@@ -2,7 +2,7 @@ use std::path::Path;
 use vhdl_lang::{format_source, FormatError, Source, VHDLParser, VHDLStandard};
 
 const INPUT: &str = "entity foo is\nport(\na:in std_logic\n);\nend entity;";
-const EXPECTED: &str = "entity foo is\n    port (\n        a: in std_logic\n    );\nend entity;\n";
+const EXPECTED: &str = "entity foo is\n    port ( a: in std_logic );\nend entity;\n";
 
 #[test]
 fn formats_an_in_memory_source() {

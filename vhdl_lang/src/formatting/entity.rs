@@ -139,9 +139,7 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    generic (
-        foo: in std_logic := '1'
-    );
+    generic ( foo: in std_logic := '1' );
 end foo;",
         );
     }
@@ -151,9 +149,7 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    port (
-        foo: in std_logic := '1'
-    );
+    port ( foo: in std_logic := '1' );
 end foo;",
         );
     }
@@ -163,12 +159,8 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    generic (
-        a: in std_logic := '1'
-    );
-    port (
-        B: in std_logic := '1'
-    );
+    generic ( a: in std_logic := '1' );
+    port ( B: in std_logic := '1' );
 end foo;",
         );
     }
@@ -178,9 +170,7 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    port (
-        foo: in std_logic := '1'
-    );
+    port ( foo: in std_logic := '1' );
     constant x: foo := bar;
     signal y: bar := foobar;
 end foo;",

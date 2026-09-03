@@ -22,6 +22,10 @@ const FIXTURES: &[(&str, &str)] = &[
         include_str!("formatting/comments.input.vhd"),
         include_str!("formatting/comments.expected.vhd"),
     ),
+    (
+        include_str!("formatting/layout.input.vhd"),
+        include_str!("formatting/layout.expected.vhd"),
+    ),
 ];
 
 #[test]

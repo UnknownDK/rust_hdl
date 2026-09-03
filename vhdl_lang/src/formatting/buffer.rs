@@ -28,6 +28,8 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    const MAX_WIDTH: usize = 100;
+
     pub fn new() -> Buffer {
         Buffer {
             inner: String::new(),
@@ -217,6 +219,17 @@ impl Buffer {
         let result = format(self);
         self.decrease_indent();
         result
+    }
+
+    pub(crate) fn push_doc(&mut self, doc: &super::layout::Doc) {
+        self.prepare_content();
+        super::layout::render(
+            doc,
+            &mut self.inner,
+            self.indentation,
+            self.indent_width,
+            Self::MAX_WIDTH,
+        );
     }
 
     /// Inserts a line break (i.e., newline) at the current position

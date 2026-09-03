@@ -23,6 +23,7 @@ mod design;
 mod entity;
 mod expression;
 mod interface;
+mod layout;
 mod name;
 mod sequential_statement;
 mod statement;
@@ -68,6 +69,12 @@ impl<'b> VHDLFormatter<'b> {
 }
 
 impl VHDLFormatter<'_> {
+    fn capture(&self, format: impl FnOnce(&Self, &mut Buffer)) -> String {
+        let mut buffer = Buffer::new();
+        format(self, &mut buffer);
+        buffer.into()
+    }
+
     pub fn format_ident_list<T: HasIdent>(&self, idents: &[T], buffer: &mut Buffer) {
         for ident in idents {
             let token = ident.ident().token;

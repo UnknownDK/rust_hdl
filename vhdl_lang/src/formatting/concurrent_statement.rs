@@ -675,18 +675,10 @@ end block;",
         check_statement(
             "\
 name: block is
-    generic (
-        gen: integer := 1
-    );
-    generic map (
-        gen => 1
-    );
-    port (
-        prt: integer := 1
-    );
-    port map (
-        prt => 2
-    );
+    generic ( gen: integer := 1 );
+    generic map ( gen => 1 );
+    port ( prt: integer := 1 );
+    port map ( prt => 2 );
 begin
 end block;",
         );
@@ -761,26 +753,18 @@ end process;",
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map (
-        const => 1
-    );",
+    generic map ( const => 1 );",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    port map (
-        clk => clk_foo
-    );",
+    port map ( clk => clk_foo );",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map (
-        const => 1
-    )
-    port map (
-        clk => clk_foo
-    );",
+    generic map ( const => 1 )
+    port map ( clk => clk_foo );",
         );
     }
 
