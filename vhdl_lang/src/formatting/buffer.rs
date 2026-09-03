@@ -7,7 +7,6 @@
 
 use crate::syntax::{Comment, Value};
 use crate::{kind_str, Token};
-use std::cmp::max;
 use std::iter;
 
 /// The Buffer is the (mostly) mutable object used to write tokens to a string.
@@ -15,6 +14,8 @@ use std::iter;
 /// de-indenting and keeping the indentation level.
 pub struct Buffer {
     inner: String,
+    /// Number of line breaks to emit before the next content.
+    pending_line_breaks: usize,
     /// insert an extra newline before pushing a token.
     /// This is relevant when there is a trailing comment
     insert_extra_newline: bool,
@@ -30,6 +31,7 @@ impl Buffer {
     pub fn new() -> Buffer {
         Buffer {
             inner: String::new(),
+            pending_line_breaks: 0,
             insert_extra_newline: false,
             indentation: 0,
             indent_char: ' ',
@@ -60,7 +62,8 @@ fn leading_comment_is_on_token_line(comment: &Comment, token: &Token) -> bool {
 }
 
 impl From<Buffer> for String {
-    fn from(value: Buffer) -> Self {
+    fn from(mut value: Buffer) -> Self {
+        value.flush_line_breaks(false);
         value.inner
     }
 }
@@ -72,15 +75,19 @@ impl Buffer {
 
     /// pushes a whitespace character to the buffer
     pub fn push_whitespace(&mut self) {
-        if !self.insert_extra_newline {
-            self.push_ch(' ');
+        if !self.insert_extra_newline
+            && self.pending_line_breaks == 0
+            && !self.inner.is_empty()
+            && !self.inner.ends_with(char::is_whitespace)
+        {
+            self.inner.push(' ');
         }
     }
 
     fn format_comment(&mut self, comment: &Comment) {
         if !comment.multi_line {
             self.push_str("--");
-            self.push_str(comment.value.trim_end())
+            self.push_str(&comment.value)
         } else {
             self.push_str("/*");
             self.push_str(&comment.value);
@@ -88,12 +95,12 @@ impl Buffer {
         }
     }
 
-    fn format_leading_comments(&mut self, comments: &[Comment]) {
+    pub(crate) fn format_comments(&mut self, comments: &[Comment]) {
         for (i, comment) in comments.iter().enumerate() {
             self.format_comment(comment);
             if let Some(next_comment) = comments.get(i + 1) {
                 let number_of_line_breaks =
-                    max(next_comment.range.start.line - comment.range.end.line, 1);
+                    (next_comment.range.start.line - comment.range.end.line).clamp(1, 2);
                 self.line_breaks(number_of_line_breaks);
             } else {
                 self.line_break();
@@ -106,6 +113,24 @@ impl Buffer {
             self.indent_char,
             self.indent_width * self.indentation,
         ));
+    }
+
+    fn flush_line_breaks(&mut self, indent: bool) {
+        if self.pending_line_breaks == 0 {
+            return;
+        }
+        if !self.inner.is_empty() {
+            self.inner
+                .extend(iter::repeat_n('\n', self.pending_line_breaks));
+        }
+        self.pending_line_breaks = 0;
+        if indent && !self.inner.is_empty() {
+            self.indent();
+        }
+    }
+
+    fn prepare_content(&mut self) {
+        self.flush_line_breaks(true);
     }
 
     /// Push a token to this buffer.
@@ -124,7 +149,7 @@ impl Buffer {
                 self.format_comment(&comments.leading[0]);
                 self.push_ch(' ');
             } else if !comments.leading.is_empty() {
-                self.format_leading_comments(comments.leading.as_slice());
+                self.format_comments(comments.leading.as_slice());
             }
         }
         match &token.value {
@@ -161,10 +186,12 @@ impl Buffer {
     }
 
     fn push_str(&mut self, value: &str) {
+        self.prepare_content();
         self.inner.push_str(value);
     }
 
     fn push_ch(&mut self, char: char) {
+        self.prepare_content();
         self.inner.push(char);
     }
 
@@ -179,14 +206,29 @@ impl Buffer {
     }
 
     pub fn decrease_indent(&mut self) {
-        self.indentation -= 1;
+        self.indentation = self
+            .indentation
+            .checked_sub(1)
+            .expect("formatter indentation underflow");
+    }
+
+    pub fn with_indent<R>(&mut self, format: impl FnOnce(&mut Self) -> R) -> R {
+        self.increase_indent();
+        let result = format(self);
+        self.decrease_indent();
+        result
     }
 
     /// Inserts a line break (i.e., newline) at the current position
     pub fn line_break(&mut self) {
         self.insert_extra_newline = false;
-        self.push_ch('\n');
-        self.indent();
+        self.pending_line_breaks = self.pending_line_breaks.max(1);
+    }
+
+    /// Ensures exactly one empty line before the next content.
+    pub fn blank_line(&mut self) {
+        self.insert_extra_newline = false;
+        self.pending_line_breaks = 2;
     }
 
     /// Inserts multiple line breaks.
@@ -194,10 +236,11 @@ impl Buffer {
     /// multiple `line_break` calls) as this method only indents the last line break
     pub fn line_breaks(&mut self, count: u32) {
         self.insert_extra_newline = false;
-        for _ in 0..count {
-            self.push_ch('\n');
+        match count {
+            0 => {}
+            1 => self.pending_line_breaks = self.pending_line_breaks.max(1),
+            _ => self.pending_line_breaks = 2,
         }
-        self.indent();
     }
 }
 
@@ -328,5 +371,20 @@ entity -- Trailing comment
 -- Leading comment
 entity -- Trailing comment"],
         );
+    }
+
+    #[test]
+    fn structural_line_breaks_are_canonical_and_indent_lazily() {
+        let mut buffer = Buffer::new();
+        buffer.push_str("first");
+        buffer.line_break();
+        buffer.line_break();
+        buffer.with_indent(|buffer| buffer.push_str("second"));
+        buffer.blank_line();
+        buffer.blank_line();
+        buffer.push_str("third");
+        buffer.line_break();
+
+        assert_eq!(String::from(buffer), "first\n    second\n\nthird\n");
     }
 }

@@ -38,7 +38,9 @@ impl VHDLFormatter<'_> {
             buffer.line_break();
             self.format_token_id(token, buffer);
         }
-        self.format_concurrent_statements(&entity.statements, buffer);
+        indented!(buffer, {
+            self.format_concurrent_statements(&entity.statements, buffer)
+        });
         buffer.line_break();
         // end [entity] [name];
         self.format_token_span(TokenSpan::new(entity.end_token, span.end_token - 1), buffer);

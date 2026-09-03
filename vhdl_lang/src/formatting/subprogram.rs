@@ -122,10 +122,10 @@ impl VHDLFormatter<'_> {
         buffer.push_whitespace();
         // is
         self.format_token_id(body.specification.span().end_token + 1, buffer);
-        buffer.line_break();
         indented!(buffer, {
             self.format_declarations(&body.declarations, buffer);
         });
+        buffer.line_break();
         self.format_token_id(body.begin_token, buffer);
         self.format_sequential_statements(&body.statements, buffer);
         buffer.line_break();

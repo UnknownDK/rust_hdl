@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 
 const INPUT: &str = "entity foo is\nport(\na:in std_logic\n);\nend entity;";
 const OTHER_INPUT: &str = "entity bar is\nend entity;";
-const EXPECTED: &str = "entity foo is\n    port (\n        a: in std_logic\n    );\nend entity;";
+const EXPECTED: &str = "entity foo is\n    port (\n        a: in std_logic\n    );\nend entity;\n";
 
 fn formatter() -> Command {
     cargo_bin_cmd!("vhdl_lang")

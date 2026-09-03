@@ -20,7 +20,7 @@ impl VHDLFormatter<'_> {
             Secondary(secondary) => self.format_any_secondary_unit(secondary, buffer),
         }
         if !is_last {
-            buffer.line_breaks(2);
+            buffer.blank_line();
         }
     }
 
@@ -232,9 +232,6 @@ end package;",
             "\
 library lib;
 use lib.foo.all;
-
-
-
 package pkg_name is
 end package;",
         );
@@ -290,7 +287,6 @@ end package body;",
         check_design_unit_formatted(
             "\
 -- This is a comment
-
 
 -- This ine appears later
 -- Third comment

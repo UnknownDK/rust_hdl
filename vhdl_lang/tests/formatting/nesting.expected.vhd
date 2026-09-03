@@ -1,0 +1,16 @@
+architecture rtl of foo is
+begin
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            for i in 0 to 7 loop
+                case sel is
+                    when 0 =>
+                        foo(i) <= bar(i);
+                    when others =>
+                        foo(i) <= '0';
+                end case;
+            end loop;
+        end if;
+    end process;
+end architecture;

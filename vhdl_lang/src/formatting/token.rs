@@ -9,7 +9,6 @@ use crate::ast::WithDecl;
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
 use crate::{TokenAccess, TokenId};
-use std::cmp::max;
 use vhdl_lang::ast::Ident;
 use vhdl_lang::TokenSpan;
 
@@ -41,7 +40,7 @@ impl VHDLFormatter<'_> {
         let current_line = self.tokens.get_pos(token_id).end().line;
         if let Some(token) = self.tokens.get_token(token_id + 1) {
             let next_line = token.full_range().start.line;
-            let numbers_of_whitespaces = max(next_line - current_line, 1);
+            let numbers_of_whitespaces = (next_line - current_line).clamp(1, 2);
             buffer.line_breaks(numbers_of_whitespaces)
         } else {
             buffer.line_break();
