@@ -263,7 +263,10 @@ pub fn parse_design_file(ctx: &mut ParsingContext<'_>) -> ParseResult<DesignFile
         );
     }
 
-    Ok(DesignFile { design_units })
+    Ok(DesignFile {
+        design_units,
+        final_comments: ctx.stream.final_comments(),
+    })
 }
 
 #[cfg(test)]
@@ -852,7 +855,8 @@ end entity;
                         end_ident_pos: None,
                         end_token: code.s1("end").token()
                     }))
-                )]
+                )],
+                final_comments: vec![],
             }
         );
     }
@@ -890,7 +894,8 @@ context lib.ctx;
         assert_eq!(
             design_file,
             DesignFile {
-                design_units: vec![]
+                design_units: vec![],
+                final_comments: vec![],
             }
         );
     }

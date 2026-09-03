@@ -60,6 +60,9 @@ impl<'b> VHDLFormatter<'b> {
                 i == file.design_units.len() - 1,
             );
         }
+        result.line_break();
+        result.format_comments(&file.final_comments);
+        result.line_break();
         result.into()
     }
 }
@@ -85,9 +88,7 @@ impl VHDLFormatter<'_> {
 #[macro_export]
 macro_rules! indented {
     ($buffer:ident, $block:block) => {
-        $buffer.increase_indent();
-        $block
-        $buffer.decrease_indent();
+        $buffer.with_indent(|$buffer| $block);
     };
 }
 

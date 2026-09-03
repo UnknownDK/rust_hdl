@@ -86,6 +86,10 @@ impl<'a> TokenStream<'a> {
         self.get_idx()
     }
 
+    pub fn final_comments(&self) -> Vec<Comment> {
+        self.tokenizer.get_final_comments().unwrap_or_default()
+    }
+
     pub fn set_state(&self, state: usize) {
         self.set_idx(state);
     }
