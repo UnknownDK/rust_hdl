@@ -11,6 +11,7 @@ use crate::syntax::Kind;
 use crate::{Token, TokenAccess};
 use vhdl_lang::ast::HasIdent;
 
+mod api;
 mod architecture;
 mod buffer;
 mod concurrent_statement;
@@ -27,6 +28,8 @@ mod sequential_statement;
 mod statement;
 mod subprogram;
 mod token;
+
+pub use api::{format_source, FormatError};
 
 /// The formatter is the main entry point used for formatting a single
 /// Design Unit from AST representation to string representation. In that sense,
