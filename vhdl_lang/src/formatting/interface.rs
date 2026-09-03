@@ -12,9 +12,10 @@ use crate::ast::{
     ModeViewIndicationKind, SeparatedList, SimpleModeIndication, SubprogramDefault,
 };
 use crate::formatting::buffer::Buffer;
+use crate::formatting::layout::Doc;
 use crate::formatting::VHDLFormatter;
 use crate::syntax::Kind;
-use crate::{indented, HasTokenSpan, TokenAccess};
+use crate::{HasTokenSpan, TokenAccess};
 use vhdl_lang::ast::token_range::WithTokenSpan;
 use vhdl_lang::ast::{InterfaceFileDeclaration, ModeViewIndication};
 use vhdl_lang::TokenSpan;
@@ -34,26 +35,49 @@ impl VHDLFormatter<'_> {
         // generic (
         // parameter (
         // (
-        self.format_token_span(TokenSpan::new(span.start_token, end_token), buffer);
-        indented!(buffer, {
-            for (i, item) in clause.items.iter().enumerate() {
-                buffer.line_break();
-                self.format_interface_declaration(item, buffer);
-                if i < clause.items.len() - 1 {
-                    self.format_token_id(item.get_end_token() + 1, buffer);
-                }
+        let open = self.capture(|formatter, buffer| {
+            formatter.format_token_span(TokenSpan::new(span.start_token, end_token), buffer)
+        });
+        let close = self.capture(|formatter, buffer| {
+            if formatter.tokens.index(span.end_token).kind == Kind::SemiColon {
+                formatter.format_token_id(span.end_token - 1, buffer);
+                formatter.format_token_id(span.end_token, buffer);
+            } else {
+                formatter.format_token_id(span.end_token, buffer);
             }
         });
-        if !clause.items.is_empty() {
-            buffer.line_break();
-        }
-        if self.tokens.index(span.end_token).kind == Kind::SemiColon {
-            // );
-            self.format_token_id(span.end_token - 1, buffer);
-            self.format_token_id(span.end_token, buffer);
+        let line = if clause.items.len() == 1 {
+            Doc::SoftLine
         } else {
-            self.format_token_id(span.end_token, buffer);
+            Doc::HardLine
+        };
+        let mut items = Vec::new();
+        for (i, item) in clause.items.iter().enumerate() {
+            if i > 0 {
+                items.push(Doc::HardLine);
+            }
+            items.push(Doc::text(self.capture(|formatter, buffer| {
+                formatter.format_interface_declaration(item, buffer);
+                if i < clause.items.len() - 1 {
+                    formatter.format_token_id(item.get_end_token() + 1, buffer);
+                }
+            })));
         }
+        let doc = if clause.items.is_empty() {
+            Doc::concat([Doc::text(open), Doc::text(close)])
+        } else {
+            Doc::group(Doc::concat([
+                Doc::text(open),
+                Doc::indent(Doc::concat([line, Doc::concat(items)])),
+                if clause.items.len() == 1 {
+                    Doc::SoftLine
+                } else {
+                    Doc::HardLine
+                },
+                Doc::text(close),
+            ]))
+        };
+        buffer.push_doc(&doc);
     }
 
     pub fn format_map_aspect_span(
@@ -64,24 +88,46 @@ impl VHDLFormatter<'_> {
     ) {
         // port map (
         // generic map (
-        self.format_token_span(
-            TokenSpan::new(span.start_token, span.start_token + 2),
-            buffer,
-        );
-        indented!(buffer, {
-            for (i, item) in list.items.iter().enumerate() {
-                buffer.line_break();
-                self.format_association_element(item, buffer);
-                if let Some(token) = list.tokens.get(i) {
-                    self.format_token_id(*token, buffer);
-                }
-            }
+        let open = self.capture(|formatter, buffer| {
+            formatter.format_token_span(
+                TokenSpan::new(span.start_token, span.start_token + 2),
+                buffer,
+            )
         });
-        if !list.items.is_empty() {
-            buffer.line_break();
+        let close =
+            self.capture(|formatter, buffer| formatter.format_token_id(span.end_token, buffer));
+        let mut items = Vec::new();
+        for (i, item) in list.items.iter().enumerate() {
+            if i > 0 {
+                items.push(Doc::HardLine);
+            }
+            items.push(Doc::text(self.capture(|formatter, buffer| {
+                formatter.format_association_element(item, buffer);
+                if let Some(token) = list.tokens.get(i) {
+                    formatter.format_token_id(*token, buffer);
+                }
+            })));
         }
-        // )
-        self.format_token_id(span.end_token, buffer);
+        let line = if list.items.len() == 1 {
+            Doc::SoftLine
+        } else {
+            Doc::HardLine
+        };
+        let doc = if list.items.is_empty() {
+            Doc::concat([Doc::text(open), Doc::text(close)])
+        } else {
+            Doc::group(Doc::concat([
+                Doc::text(open),
+                Doc::indent(Doc::concat([line, Doc::concat(items)])),
+                if list.items.len() == 1 {
+                    Doc::SoftLine
+                } else {
+                    Doc::HardLine
+                },
+                Doc::text(close),
+            ]))
+        };
+        buffer.push_doc(&doc);
     }
 
     pub fn format_map_aspect(&self, aspect: &MapAspect, buffer: &mut Buffer) {
@@ -378,12 +424,7 @@ mod tests {
 
     #[test]
     fn format_interface_package_declaration() {
-        check_generic(
-            "\
-package foo is new lib.pkg generic map (
-    foo => bar
-)",
-        );
+        check_generic("package foo is new lib.pkg generic map ( foo => bar )");
         check_generic("package foo is new lib.pkg generic map (<>)");
         check_generic("package foo is new lib.pkg generic map (default)");
     }
