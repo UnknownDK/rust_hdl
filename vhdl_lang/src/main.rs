@@ -6,12 +6,11 @@
 
 use clap::Parser;
 use itertools::Itertools;
-use std::iter::zip;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use vhdl_lang::ast::DesignFile;
 use vhdl_lang::{
-    Config, Diagnostic, MessagePrinter, Project, Severity, SeverityMap, Source, VHDLFormatter,
-    VHDLParser, VHDLStandard,
+    format_source, Config, Diagnostic, FormatError, MessagePrinter, Project, Severity, SeverityMap,
+    Source, VHDLParser, VHDLStandard,
 };
 
 #[derive(Debug, clap::Args)]
@@ -25,7 +24,11 @@ pub struct Group {
     ///
     /// This is experimental and the formatting behavior will change in the future.
     #[arg(short, long)]
-    format: Option<String>,
+    format: Option<PathBuf>,
+
+    /// Format VHDL read from stdin and write the complete result to stdout.
+    #[arg(long)]
+    format_stdin: bool,
 }
 
 /// Run vhdl analysis
@@ -41,6 +44,10 @@ struct Args {
     #[arg(short = 'l', long)]
     libraries: Option<String>,
 
+    /// Optional source path metadata for diagnostics in --format-stdin mode.
+    #[arg(long, requires = "format_stdin")]
+    stdin_filepath: Option<PathBuf>,
+
     #[clap(flatten)]
     group: Group,
 }
@@ -50,55 +57,78 @@ fn main() {
     if let Some(config_path) = args.group.config {
         parse_and_analyze_project(&config_path, args.num_threads, args.libraries.as_ref());
     } else if let Some(format) = args.group.format {
-        format_file(format);
+        run_formatter(format_file(&format));
+    } else if args.group.format_stdin {
+        run_formatter(format_stdin(args.stdin_filepath.as_deref()));
     }
 }
 
-fn format_file(format: String) {
-    let path = PathBuf::from(format);
+fn run_formatter(result: Result<(), CliFormatError>) {
+    if let Err(err) = result {
+        show_format_error(&err);
+        std::process::exit(if matches!(err, CliFormatError::Format(_)) {
+            1
+        } else {
+            2
+        });
+    }
+}
+
+fn format_file(path: &Path) -> Result<(), CliFormatError> {
     let parser = VHDLParser::new(VHDLStandard::default());
-    let mut diagnostics = Vec::new();
-    let result = parser.parse_design_file(&path, &mut diagnostics);
-    match result {
-        Ok((_, design_file)) => {
-            if !diagnostics.is_empty() {
-                show_diagnostics(&diagnostics, &SeverityMap::default());
-                std::process::exit(1);
-            }
-            let result = VHDLFormatter::format_design_file(&design_file);
-            println!("{result}");
-            check_formatted_file(&path, &parser, design_file, &result);
-            std::process::exit(0);
-        }
-        Err(err) => {
-            println!("{err}");
-            std::process::exit(1);
-        }
+    let source = Source::from_latin1_file(path)?;
+    write_stdout(&format_source(&parser, &source)?)
+}
+
+fn format_stdin(path: Option<&Path>) -> Result<(), CliFormatError> {
+    let mut input = String::new();
+    io::stdin().read_to_string(&mut input)?;
+    let source = Source::inline(path.unwrap_or_else(|| Path::new("<stdin>.vhd")), &input);
+    let parser = VHDLParser::new(VHDLStandard::default());
+    write_stdout(&format_source(&parser, &source)?)
+}
+
+fn write_stdout(output: &str) -> Result<(), CliFormatError> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    stdout.write_all(output.as_bytes())?;
+    stdout.flush()?;
+    Ok(())
+}
+
+#[derive(Debug)]
+enum CliFormatError {
+    Io(io::Error),
+    Format(FormatError),
+}
+
+impl From<io::Error> for CliFormatError {
+    fn from(err: io::Error) -> Self {
+        Self::Io(err)
     }
 }
 
-fn check_formatted_file(path: &Path, parser: &VHDLParser, design_file: DesignFile, result: &str) {
-    let mut diagnostics: Vec<Diagnostic> = Vec::new();
-    let new_file = parser.parse_design_source(&Source::inline(path, result), &mut diagnostics);
-    if !diagnostics.is_empty() {
-        println!("Formatting failed as it resulted in a syntactically incorrect file.");
-        show_diagnostics(&diagnostics, &SeverityMap::default());
-        std::process::exit(1);
+impl From<FormatError> for CliFormatError {
+    fn from(err: FormatError) -> Self {
+        Self::Format(err)
     }
-    for ((tokens_a, _), (tokens_b, _)) in zip(new_file.design_units, design_file.design_units) {
-        for (a, b) in zip(tokens_a, tokens_b) {
-            if !a.equal_format(&b) {
-                println!("Token mismatch");
-                println!("New Token={a:#?}");
-                let contents = a.pos.source.contents();
-                let a_line = contents.get_line(a.pos.range.start.line as usize).unwrap();
-                println!("    {a_line}");
-                println!("Old Token={b:#?}");
-                let b_line = result.lines().nth(b.pos.range.start.line as usize).unwrap();
-                println!("    {b_line}");
-                break;
-            }
+}
+
+fn show_format_error(err: &CliFormatError) {
+    match err {
+        CliFormatError::Io(err) => eprintln!("{err}"),
+        CliFormatError::Format(FormatError::InputDiagnostics(diagnostics)) => {
+            eprintln!("input contains {} parse diagnostic(s)", diagnostics.len());
+            show_diagnostics_to(diagnostics, &SeverityMap::default(), &mut io::stderr());
         }
+        CliFormatError::Format(FormatError::OutputDiagnostics(diagnostics)) => {
+            eprintln!(
+                "formatted output contains {} parse diagnostic(s)",
+                diagnostics.len()
+            );
+            show_diagnostics_to(diagnostics, &SeverityMap::default(), &mut io::stderr());
+        }
+        CliFormatError::Format(err) => eprintln!("{err}"),
     }
 }
 
@@ -138,15 +168,23 @@ fn parse_and_analyze_project(
 }
 
 fn show_diagnostics(diagnostics: &[Diagnostic], severity_map: &SeverityMap) {
+    show_diagnostics_to(diagnostics, severity_map, &mut io::stdout());
+}
+
+fn show_diagnostics_to(
+    diagnostics: &[Diagnostic],
+    severity_map: &SeverityMap,
+    writer: &mut dyn Write,
+) {
     let diagnostics = diagnostics
         .iter()
         .filter_map(|diag| diag.show(severity_map))
         .collect_vec();
     for str in &diagnostics {
-        println!("{str}");
+        let _ = writeln!(writer, "{str}");
     }
 
     if !diagnostics.is_empty() {
-        println!("Found {} diagnostics", diagnostics.len());
+        let _ = writeln!(writer, "Found {} diagnostics", diagnostics.len());
     }
 }
