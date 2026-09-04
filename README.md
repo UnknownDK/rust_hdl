@@ -102,8 +102,9 @@ assert false
 
 Colons align in adjacent object/file declarations, interfaces and record fields.
 Arrows align in named port/generic map and aggregate associations; ordinary calls
-retain their spacing. Inline lists never receive column padding; alignment in
-interfaces, maps and aggregates applies when the item count exceeds the inline limit.
+retain their spacing. Inline lists never receive column padding. Interfaces and
+maps align whenever they expand, whether because of width, comments or the
+argument limit. Named aggregates align when their item count exceeds the inline limit.
 Blank lines, standalone comments and other item kinds separate
 groups. Rows with internal/trailing comments or wrapped content do not contribute
 padding. Alignment falls back to ordinary spacing if the combined columns would
@@ -138,6 +139,12 @@ Grouped interface names wrap at one indentation level. A long declaration
 prefers moving its complete mode/type to the next line before splitting the
 type's range; internal wrapping remains available if the type cannot fit there
 either. Keyword-prefixed declarations retain their continuation indentation.
+
+Long attribute specifications break after `of` and `is`. Aliases separate their
+type and target at clause boundaries, keeping complete type constraints together
+when they fit. Short attributes and aliases stay inline. Long external names
+expand inside `<< ... >>`, preserving the path and preferring a complete subtype
+on a continuation line.
 
 Enumeration literals and array dimensions use width-aware lists: short lists
 stay inline, while expanded lists put each item on its own line. These lists do

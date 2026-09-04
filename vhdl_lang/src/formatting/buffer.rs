@@ -115,7 +115,7 @@ impl Buffer {
         start
     }
 
-    pub(crate) fn align_rows(&mut self, rows: &[usize]) {
+    pub(crate) fn align_rows(&mut self, rows: &[usize], when_broken: bool) {
         let available = self
             .config
             .max_width
@@ -125,20 +125,24 @@ impl Buffer {
             match self.docs[index].alignment_widths() {
                 Some((left, right)) if left + right <= available => run.push((index, left, right)),
                 _ => {
-                    self.align_run(&run, available);
+                    self.align_run(&run, available, when_broken);
                     run.clear();
                 }
             }
         }
-        self.align_run(&run, available);
+        self.align_run(&run, available, when_broken);
     }
 
-    fn align_run(&mut self, run: &[(usize, usize, usize)], available: usize) {
+    fn align_run(&mut self, run: &[(usize, usize, usize)], available: usize, when_broken: bool) {
         let left = run.iter().map(|row| row.1).max().unwrap_or(0);
         let right = run.iter().map(|row| row.2).max().unwrap_or(0);
         if left + right <= available {
             for &(index, width, _) in run {
-                self.docs[index].pad_alignment(left - width);
+                if when_broken {
+                    self.docs[index].pad_alignment_when_broken(left - width);
+                } else {
+                    self.docs[index].pad_alignment(left - width);
+                }
             }
             self.rendered.take();
         }

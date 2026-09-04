@@ -12,6 +12,7 @@ impl VHDLFormatter<'_> {
         &self,
         items: &[T],
         buffer: &mut Buffer,
+        when_broken: bool,
         target: impl Fn(&T) -> Option<TokenId>,
         span: impl Fn(&T) -> TokenSpan,
         mut build: impl FnMut(usize, &T, &mut Buffer),
@@ -40,7 +41,7 @@ impl VHDLFormatter<'_> {
             let boundary =
                 target.is_none() || comments || previous_end.is_some_and(|end| start > end + 1);
             if boundary {
-                buffer.align_rows(&rows);
+                buffer.align_rows(&rows, when_broken);
                 rows.clear();
             }
             if let Some(target) = target {
@@ -53,6 +54,6 @@ impl VHDLFormatter<'_> {
             }
             previous_end = Some(self.tokens.index(span.end_token).pos.end().line);
         }
-        buffer.align_rows(&rows);
+        buffer.align_rows(&rows, when_broken);
     }
 }

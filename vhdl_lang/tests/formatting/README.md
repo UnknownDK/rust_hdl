@@ -38,6 +38,15 @@ is preferred to splitting its range. Otherwise the existing internal breaks are
 used. Defaults remain separate groups, so a long default does not unnecessarily
 expand a short type. No child document is rendered during this decision.
 
+Attribute declarations wrap before their type; expanded specifications break
+after `of` and `is`, with independent wrapping of the entity/class clause and
+value. Aliases group breaks before their subtype and target, retaining complete
+type constraints when they fit with the following `is`. External names use an
+independently grouped `<< ... >>` layout with a preferred break before their
+subtype. Absolute, relative and package paths, signatures and comments retain
+their original tokens and anchors. Short declarations and external names remain
+inline.
+
 Enumeration literals and array dimensions are width-aware delimiter groups,
 independent of `inline_argument_limit`. Expanded lists break after the opening
 parenthesis, between items and before the closing parenthesis. Dimensions retain
@@ -83,10 +92,18 @@ Original spaces within comment text and disabled regions remain untouched.
 colons in object/file declarations, interfaces and record fields; the latter
 aligns named port/generic map and aggregate arrows. It does not align modes,
 types, default expressions, assignments or ordinary calls.
-Inline lists do not receive alignment padding. In interfaces and maps, column
-alignment applies to lists expanded by the argument limit; this also applies to
-named aggregates. Short lists that wrap only for width/comments retain ordinary
-spacing.
+Inline lists do not receive alignment padding. Interfaces and maps align when
+expanded by width, comments, preserved blank lines or the argument limit. Named
+aggregates retain their argument-limit-based alignment policy.
+
+For interfaces/maps below the argument limit, only rows needing extra padding
+have separate unpadded and padded document branches. The enclosing list measures
+the unpadded flat branch, then selects the padded branch if it expands. Padding
+therefore cannot force an otherwise-fitting list to wrap. Both branches cache
+their width summaries; no child rendering or second AST formatting pass is used.
+Ordinary newlines between items do not force expansion; actual blank lines are
+preserved as alignment boundaries. Separator comments are included when deciding
+whether a row can participate.
 
 Rows carry an `Align` document primitive, not literal spaces in token text.
 Adjacent single-line rows are measured using document width summaries. The
@@ -129,6 +146,15 @@ boundaries, short forms, constrained dimensions, whole-type and narrow-width
 fallbacks, timing modifiers, selected/conditional waveforms and all three
 language standards. Comment anchoring and idempotency are exercised across 144
 width/indent/argument-limit/casing/alignment combinations.
+
+`declaration_details.input.vhd` and `declaration_details.expected.vhd` show
+attribute/alias clauses, an external name and two-item aligned interfaces/maps
+at width 60. `format_declaration_details.rs` covers the golden layout, inline and
+width-boundary behavior, alignment fallback and boundaries, narrow declarations,
+signatures, external-name paths, disabled regions and language versions. Its
+comment/nesting matrix checks 288 width/indent/argument-limit/casing/alignment
+combinations. A renderer unit test verifies that conditional padding cannot
+force an inline list to wrap.
 
 `alignment_rtl.input.vhd` and `alignment_rtl.expected.vhd` provide a reviewed,
 synthetic RTL style baseline with a state machine, payload registers, interface

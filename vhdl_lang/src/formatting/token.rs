@@ -61,4 +61,17 @@ impl VHDLFormatter<'_> {
             buffer.line_break();
         }
     }
+
+    pub(crate) fn soft_line_preserve_blank_line(&self, token_id: TokenId, buffer: &mut Buffer) {
+        let current_line = self.tokens.get_pos(token_id).end().line;
+        if self
+            .tokens
+            .get_token(token_id + 1)
+            .is_some_and(|token| token.full_range().start.line > current_line + 1)
+        {
+            buffer.blank_line();
+        } else {
+            buffer.soft_line();
+        }
+    }
 }

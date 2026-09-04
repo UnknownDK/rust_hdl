@@ -115,41 +115,42 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_external_name(&self, name: WithTokenSpan<&ExternalName>, buffer: &mut Buffer) {
-        // <<
-        self.format_token_id(name.span.start_token, buffer);
-        buffer.push_whitespace();
-        // entity class
-        self.format_token_id(name.span.start_token + 1, buffer);
-        buffer.push_whitespace();
-        let path = &name.item.path;
-        match &path.item {
-            ExternalPath::Package(name) => {
-                // @
-                self.format_token_id(name.span.start_token - 1, buffer);
-                self.format_name(name.as_ref(), buffer)
-            }
-            ExternalPath::Absolute(name) => {
-                // .
-                self.format_token_id(name.span.start_token - 1, buffer);
-                self.format_name(name.as_ref(), buffer);
-            }
-            ExternalPath::Relative(name, up_levels) => {
-                for i in (1..=*up_levels).rev() {
-                    // ^
-                    self.format_token_id(name.span.start_token - (2 * i), buffer);
-                    // .
-                    self.format_token_id(name.span.start_token - (2 * i - 1), buffer);
-                }
-                self.format_name(name.as_ref(), buffer)
-            }
-        }
-        buffer.push_whitespace();
-        self.format_token_id(name.item.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(&name.item.subtype, buffer);
-        buffer.push_whitespace();
-        // >>
-        self.format_token_id(name.span.end_token, buffer);
+        buffer.expression_group(|buffer| {
+            self.format_token_id(name.span.start_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                buffer.fill_group(|buffer| {
+                    self.format_token_id(name.span.start_token + 1, buffer);
+                    buffer.soft_line();
+                    let path = &name.item.path;
+                    match &path.item {
+                        ExternalPath::Package(name) => {
+                            self.format_token_id(name.span.start_token - 1, buffer);
+                            self.format_name(name.as_ref(), buffer)
+                        }
+                        ExternalPath::Absolute(name) => {
+                            self.format_token_id(name.span.start_token - 1, buffer);
+                            self.format_name(name.as_ref(), buffer);
+                        }
+                        ExternalPath::Relative(name, up_levels) => {
+                            for i in (1..=*up_levels).rev() {
+                                self.format_token_id(name.span.start_token - (2 * i), buffer);
+                                self.format_token_id(name.span.start_token - (2 * i - 1), buffer);
+                            }
+                            self.format_name(name.as_ref(), buffer)
+                        }
+                    }
+                    buffer.push_whitespace();
+                    self.format_token_id(name.item.colon_token, buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.preferred_line();
+                        self.format_subtype_indication(&name.item.subtype, buffer);
+                    });
+                });
+            });
+            buffer.soft_line();
+            self.format_token_id(name.span.end_token, buffer);
+        });
     }
 
     pub fn format_name_list(&self, buffer: &mut Buffer, names: &[WithTokenSpan<Name>]) {

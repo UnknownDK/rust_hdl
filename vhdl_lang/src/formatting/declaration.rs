@@ -34,6 +34,7 @@ impl VHDLFormatter<'_> {
         self.format_aligned_items(
             declarations,
             buffer,
+            false,
             |item| {
                 if align {
                     match &item.item {
@@ -399,6 +400,7 @@ impl VHDLFormatter<'_> {
             self.format_aligned_items(
                 elements,
                 buffer,
+                false,
                 |item| align.then_some(item.colon_token),
                 |item| item.span,
                 |i, element, buffer| {
@@ -499,15 +501,18 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_token_span(
-            TokenSpan::new(span.start_token, attribute.ident.tree.token),
-            buffer,
-        );
-        // :
-        self.format_token_id(attribute.ident.tree.token + 1, buffer);
-        buffer.push_whitespace();
-        self.format_name(attribute.type_mark.as_ref(), buffer);
-        self.format_token_id(span.end_token, buffer);
+        buffer.group(|buffer| {
+            self.format_token_span(
+                TokenSpan::new(span.start_token, attribute.ident.tree.token),
+                buffer,
+            );
+            self.format_token_id(attribute.ident.tree.token + 1, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                self.format_name(attribute.type_mark.as_ref(), buffer);
+            });
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_attribute_specification(
@@ -516,31 +521,40 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        // attribute <name> of
-        self.format_token_span(
-            TokenSpan::new(span.start_token, attribute.ident.item.token + 1),
-            buffer,
-        );
-        buffer.push_whitespace();
-        match &attribute.entity_name {
-            EntityName::Name(name) => {
-                self.format_token_id(name.designator.token, buffer);
-                if let Some(signature) = &name.signature {
-                    self.format_signature(signature, buffer);
-                }
-            }
-            EntityName::All | EntityName::Others => {
-                self.format_token_id(attribute.ident.item.token + 2, buffer)
-            }
-        }
-        // : <entity_class> is
-        self.format_token_span(
-            TokenSpan::new(attribute.colon_token, attribute.colon_token + 2),
-            buffer,
-        );
-        buffer.push_whitespace();
-        self.format_conditional_expression(attribute.expr.as_ref(), buffer);
-        self.format_token_id(span.end_token, buffer);
+        buffer.group(|buffer| {
+            // attribute <name> of
+            self.format_token_span(
+                TokenSpan::new(span.start_token, attribute.ident.item.token + 1),
+                buffer,
+            );
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                buffer.group(|buffer| {
+                    match &attribute.entity_name {
+                        EntityName::Name(name) => {
+                            self.format_token_id(name.designator.token, buffer);
+                            if let Some(signature) = &name.signature {
+                                self.format_signature(signature, buffer);
+                            }
+                        }
+                        EntityName::All | EntityName::Others => {
+                            self.format_token_id(attribute.ident.item.token + 2, buffer)
+                        }
+                    }
+                    self.format_token_id(attribute.colon_token, buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_line();
+                        self.format_token_span(
+                            TokenSpan::new(attribute.colon_token + 1, attribute.colon_token + 2),
+                            buffer,
+                        );
+                    });
+                });
+                buffer.soft_line();
+                self.format_conditional_expression(attribute.expr.as_ref(), buffer);
+            });
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_alias_declaration(
@@ -549,25 +563,30 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        // alias <name>
-        self.format_token_span(
-            TokenSpan::new(span.start_token, span.start_token + 1),
-            buffer,
-        );
-        if let Some(subtype) = &alias.subtype_indication {
-            // :
-            self.format_token_id(span.start_token + 2, buffer);
-            buffer.push_whitespace();
-            self.format_subtype_indication(subtype, buffer);
-        }
-        buffer.push_whitespace();
-        self.format_token_id(alias.is_token, buffer);
-        buffer.push_whitespace();
-        self.format_name(alias.name.as_ref(), buffer);
-        if let Some(signature) = &alias.signature {
-            self.format_signature(signature, buffer);
-        }
-        self.format_token_id(span.end_token, buffer);
+        buffer.group(|buffer| {
+            // alias <name>
+            self.format_token_span(
+                TokenSpan::new(span.start_token, span.start_token + 1),
+                buffer,
+            );
+            if alias.subtype_indication.is_some() {
+                self.format_token_id(span.start_token + 2, buffer);
+            }
+            buffer.with_indent(|buffer| {
+                if let Some(subtype) = &alias.subtype_indication {
+                    buffer.soft_line();
+                    self.format_subtype_indication(subtype, buffer);
+                }
+                buffer.push_whitespace();
+                self.format_token_id(alias.is_token, buffer);
+                buffer.soft_line();
+                self.format_name(alias.name.as_ref(), buffer);
+                if let Some(signature) = &alias.signature {
+                    self.format_signature(signature, buffer);
+                }
+            });
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_use_clause(&self, use_clause: &UseClause, buffer: &mut Buffer) {
