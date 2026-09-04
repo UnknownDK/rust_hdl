@@ -31,19 +31,25 @@ impl VHDLFormatter<'_> {
         }
         buffer.line_break();
         let align = buffer.config().align_declarations;
-        self.format_aligned_items(
+        self.format_aligned_items_multi(
             declarations,
             buffer,
-            false,
+            (false, true),
             |item| {
                 if align {
                     match &item.item {
-                        Declaration::Object(object) => Some(object.colon_token),
-                        Declaration::File(file) => Some(file.colon_token),
-                        _ => None,
+                        Declaration::Object(object) => {
+                            let mut targets = vec![(object.colon_token, 1)];
+                            if let Some(expression) = &object.expression {
+                                targets.push((expression.span.start_token - 1, 0));
+                            }
+                            targets
+                        }
+                        Declaration::File(file) => vec![(file.colon_token, 1)],
+                        _ => Vec::new(),
                     }
                 } else {
-                    None
+                    Vec::new()
                 }
             },
             |item| item.span,
@@ -397,7 +403,7 @@ impl VHDLFormatter<'_> {
         indented!(buffer, {
             let align = buffer.config().align_declarations;
             buffer.line_break();
-            self.format_aligned_items(
+            self.format_aligned_items_with_trailing_comments(
                 elements,
                 buffer,
                 false,

@@ -15,7 +15,7 @@ end;
 
 entity e is
     port (
-        data         : in std_logic_vector(31 downto 0);
+        data         : in  std_logic_vector(31 downto 0);
         output_ready : out boolean
     );
 end;

@@ -9,6 +9,13 @@ fn aligned() -> FormatConfig {
     }
 }
 
+fn fully_aligned() -> FormatConfig {
+    FormatConfig {
+        align_assignments: true,
+        ..aligned()
+    }
+}
+
 #[test]
 fn representative_rtl_style_fixture() {
     let input = include_str!("formatting/alignment_rtl.input.vhd");
@@ -42,7 +49,7 @@ fn checked(input: &str, config: FormatConfig) -> String {
 #[test]
 fn selective_alignment_matches_style_b() {
     let input = "entity demo is\nport(clk: in bit; reset_n: in bit; output_valid: out boolean);\nend entity;\narchitecture rtl of demo is\nsignal ready: boolean := false;\nsignal transfer_count: natural := 0;\nbegin\nchild: entity work.demo port map(clk => clk, reset_n => reset_n, output_valid => ready);\nend architecture;";
-    let expected = "entity demo is\n    port (\n        clk          : in bit;\n        reset_n      : in bit;\n        output_valid : out boolean\n    );\nend entity;\n\narchitecture rtl of demo is\n    signal ready          : boolean := false;\n    signal transfer_count : natural := 0;\nbegin\n    child: entity work.demo\n        port map (\n            clk          => clk,\n            reset_n      => reset_n,\n            output_valid => ready\n        );\nend architecture;\n";
+    let expected = "entity demo is\n    port (\n        clk          : in  bit;\n        reset_n      : in  bit;\n        output_valid : out boolean\n    );\nend entity;\n\narchitecture rtl of demo is\n    signal ready          : boolean := false;\n    signal transfer_count : natural := 0;\nbegin\n    child: entity work.demo\n        port map (\n            clk          => clk,\n            reset_n      => reset_n,\n            output_valid => ready\n        );\nend architecture;\n";
     assert_eq!(checked(input, aligned()), expected);
     let plain = checked(input, FormatConfig::default());
     assert!(plain.contains("signal ready: boolean := false;"));
@@ -217,4 +224,90 @@ fn comments_at_each_declaration_token_gap_do_not_move() {
         );
         checked(&source, aligned());
     }
+}
+
+#[test]
+fn declarations_align_colons_modes_and_defaults_in_local_columns() {
+    let input = "entity demo is generic(short: natural := 1; longer_name: positive := 10; flag: boolean); port(rst: in bit; clock_enable: in bit; result: out bit); end; architecture rtl of demo is constant C: real := 1.0; constant LONG_NAME: natural := 10; signal ready: boolean; begin end;";
+    let output = checked(input, aligned());
+    assert!(
+        output.contains(
+            "short       : natural  := 1;\n        longer_name : positive := 10;\n        flag        : boolean"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "rst          : in  bit;\n        clock_enable : in  bit;\n        result       : out bit"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "constant C         : real    := 1.0;\n    constant LONG_NAME : natural := 10;\n    signal ready       : boolean;"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
+fn trailing_comments_do_not_break_declaration_alignment() {
+    let input = "package p is signal a: bit; -- first\nsignal longer_name: bit; -- second\nsignal mid: bit; end;";
+    let output = checked(input, aligned());
+    assert!(
+        output.contains(
+            "signal a           : bit; -- first\n    signal longer_name : bit; -- second\n    signal mid         : bit;"
+        ),
+        "{output}"
+    );
+}
+
+#[test]
+fn simple_assignments_align_inside_their_immediate_statement_block() {
+    let input = "entity e is end; architecture rtl of e is signal short: bit; signal longer_signal: bit; begin short <= '0'; longer_signal <= '1'; process variable count: natural; begin short <= '1'; longer_variable := 2; count := 3; null; short <= '0'; longer_signal <= '1'; end process; end;";
+    let output = checked(input, fully_aligned());
+    assert!(
+        output.contains("short         <= '0';\n    longer_signal <= '1';"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "short           <= '1';\n        longer_variable := 2;\n        count           := 3;"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains("null;\n        short         <= '0';\n        longer_signal <= '1';"),
+        "{output}"
+    );
+}
+
+#[test]
+fn assignment_alignment_is_independent_and_honors_trailing_comments() {
+    let input = "entity e is end; architecture rtl of e is begin a <= '0'; -- first\nlonger_name <= '1'; -- second\nend;";
+    let aligned = checked(
+        input,
+        FormatConfig {
+            align_assignments: true,
+            ..FormatConfig::default()
+        },
+    );
+    assert!(
+        aligned.contains("a           <= '0'; -- first\n    longer_name <= '1'; -- second"),
+        "{aligned}"
+    );
+    let plain = checked(input, FormatConfig::default());
+    assert!(plain.contains("a <= '0'; -- first\n    longer_name <= '1';"));
+}
+
+#[test]
+fn context_items_are_grouped_without_reordering() {
+    let input = "library IEEE, XESS;\nuse IEEE.std_logic_1164.all;\nuse IEEE.numeric_std.all;\nuse IEEE.std_logic_arith.all;\nuse IEEE.MATH_REAL.all;\nuse XESS.CommonPckg.all;\nuse XESS.AudioPckg.all;\nentity e is end;";
+    let output = checked(input, FormatConfig::default());
+    assert!(
+        output.starts_with(
+            "library IEEE, XESS;\n\nuse IEEE.std_logic_1164.all;\nuse IEEE.numeric_std.all;\nuse IEEE.std_logic_arith.all;\nuse IEEE.MATH_REAL.all;\n\nuse XESS.CommonPckg.all;\nuse XESS.AudioPckg.all;\n\nentity e is"
+        ),
+        "{output}"
+    );
 }

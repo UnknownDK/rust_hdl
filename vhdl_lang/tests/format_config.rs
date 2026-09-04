@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use vhdl_lang::{FormatConfig, KeywordCase};
 
 const INPUT: &str = "package P is signal a: bit; signal longer: bit; end;";
-const SETTINGS: &str = "standard = '2008'\n[format]\nindent_width = 2\nkeyword_case = 'upper'\nalign_declarations = true\nalign_associations = true\n";
+const SETTINGS: &str = "standard = '2008'\n[format]\nindent_width = 2\nkeyword_case = 'upper'\nalign_declarations = true\nalign_associations = true\nalign_assignments = true\n";
 const EXPECTED: &str = "PACKAGE P IS\n  SIGNAL a      : bit;\n  SIGNAL longer : bit;\nEND;\n";
 
 fn formatter() -> Command {
@@ -19,7 +19,7 @@ fn project_settings_parse_with_defaults_and_strict_validation() {
     assert_eq!(config.keyword_case, KeywordCase::Upper);
     assert_eq!(config.max_width, 100);
     assert_eq!(config.inline_argument_limit, 2);
-    assert!(config.align_declarations && config.align_associations);
+    assert!(config.align_declarations && config.align_associations && config.align_assignments);
     assert_eq!(
         FormatConfig::from_toml("[libraries]").unwrap(),
         FormatConfig::default()
@@ -34,12 +34,43 @@ fn project_settings_parse_with_defaults_and_strict_validation() {
         "[format]\nkeyword_case = 'preserve'",
         "[format]\nalign_defaults = true",
         "[format]\nalign_declarations = 'true'",
+        "[format]\nalign_assignments = 'true'",
         "[format]\ninline_argument_limit = -1",
         "[format]\ninline_argument_limit = 10001",
         "[format]\ninline_argument_limit = '2'",
     ] {
         assert!(FormatConfig::from_toml(bad).is_err(), "accepted {bad}");
     }
+}
+
+#[test]
+fn assignment_alignment_is_loaded_and_can_be_overridden() {
+    let project = TempDir::new().unwrap();
+    fs::write(
+        project.path().join("vhdl_ls.toml"),
+        "[format]\nalign_assignments = true",
+    )
+    .unwrap();
+    let input =
+        "entity e is end; architecture rtl of e is begin a <= '0'; longer_name <= '1'; end;";
+    formatter()
+        .current_dir(project.path())
+        .arg("--format-stdin")
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "a           <= '0';\n    longer_name <= '1';",
+        ));
+    formatter()
+        .current_dir(project.path())
+        .args(["--format-stdin", "--align-assignments=false"])
+        .write_stdin(input)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "a <= '0';\n    longer_name <= '1';",
+        ));
 }
 
 #[test]

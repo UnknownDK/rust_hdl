@@ -24,6 +24,8 @@ pub struct FormatConfig {
     pub align_declarations: bool,
     /// Align arrows in adjacent named map and aggregate associations.
     pub align_associations: bool,
+    /// Align assignment operators in adjacent simple statements.
+    pub align_assignments: bool,
     /// Maximum list items to keep inline, when they fit. Zero always expands
     /// nonempty calls, parameter/interface lists, maps and named aggregates.
     /// Purely positional aggregates remain width-driven.
@@ -38,6 +40,7 @@ impl Default for FormatConfig {
             keyword_case: KeywordCase::Lower,
             align_declarations: false,
             align_associations: false,
+            align_assignments: false,
             inline_argument_limit: 2,
         }
     }
@@ -75,14 +78,15 @@ impl FormatConfig {
                         _ => return Err("format.keyword_case must be 'lower' or 'upper'".into()),
                     }
                 }
-                "align_declarations" | "align_associations" => {
+                "align_declarations" | "align_associations" | "align_assignments" => {
                     let enabled = value
                         .as_bool()
                         .ok_or_else(|| format!("format.{key} must be a boolean"))?;
-                    if key == "align_declarations" {
-                        config.align_declarations = enabled;
-                    } else {
-                        config.align_associations = enabled;
+                    match key.as_str() {
+                        "align_declarations" => config.align_declarations = enabled,
+                        "align_associations" => config.align_associations = enabled,
+                        "align_assignments" => config.align_assignments = enabled,
+                        _ => unreachable!(),
                     }
                 }
                 _ => return Err(format!("unknown formatter option format.{key}")),

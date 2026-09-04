@@ -49,21 +49,50 @@ impl VHDLFormatter<'_> {
                         buffer.line_break();
                     }
                     let align = buffer.config().align_declarations;
-                    self.format_aligned_items(
+                    let align_modes = align
+                        && clause.items.iter().all(|item| {
+                            matches!(item, InterfaceDeclaration::Object(object)
+                                if matches!(&object.mode, ModeIndication::Simple(simple)
+                                    if simple.mode.is_some()))
+                        });
+                    self.format_aligned_items_multi(
                         &clause.items,
                         buffer,
-                        !multiline,
+                        (!multiline, true),
                         |item| {
                             if align {
                                 match item {
                                     InterfaceDeclaration::Object(object) => {
-                                        Some(object.colon_token)
+                                        let mut targets = vec![(object.colon_token, 1)];
+                                        if let ModeIndication::Simple(simple) = &object.mode {
+                                            if align_modes {
+                                                let subtype = simple
+                                                    .subtype_indication
+                                                    .resolution
+                                                    .as_ref()
+                                                    .map_or(
+                                                        simple
+                                                            .subtype_indication
+                                                            .type_mark
+                                                            .span
+                                                            .start_token,
+                                                        HasTokenSpan::get_start_token,
+                                                    );
+                                                targets.push((subtype, 0));
+                                            }
+                                            if let Some(expression) = &simple.expression {
+                                                targets.push((expression.span.start_token - 1, 0));
+                                            }
+                                        }
+                                        targets
                                     }
-                                    InterfaceDeclaration::File(file) => Some(file.colon_token),
-                                    _ => None,
+                                    InterfaceDeclaration::File(file) => {
+                                        vec![(file.colon_token, 1)]
+                                    }
+                                    _ => Vec::new(),
                                 }
                             } else {
-                                None
+                                Vec::new()
                             }
                         },
                         |item| {

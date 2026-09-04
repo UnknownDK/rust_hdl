@@ -40,8 +40,8 @@ operators such as `and` and `not`; identifiers, quoted operator symbols and
 literals are unaffected. Width counts Unicode scalar values. Unbreakable tokens,
 preserved comments and disabled regions may exceed the preferred width.
 
-To enable selective alignment (declaration colons and map/aggregate arrows, but
-not default values), add this section to your project's `vhdl_ls.toml`:
+To enable selective alignment for declarations, assignments and named
+associations, add this section to your project's `vhdl_ls.toml`:
 
 ```toml
 [format]
@@ -50,6 +50,7 @@ indent_width = 4
 keyword_case = "lower"
 align_declarations = true
 align_associations = true
+align_assignments = true
 inline_argument_limit = 2
 ```
 
@@ -62,11 +63,12 @@ not discover files implicitly; use `FormatConfig::from_toml` to load settings.
 
 CLI options override project settings. Use `--format-config path/to/settings.toml`
 to select a file explicitly, or `--no-format-config` to disable discovery.
-`--align-declarations` and `--align-associations` enable alignment;
-`--align-declarations=false` and `--align-associations=false` disable it. Both
-default to false. Width must be 1–10000, indentation 0–32 spaces. Unknown options
-in `[format]`, invalid values, and unreadable selected configuration files are
-errors reported on stderr without formatted output.
+`--align-declarations`, `--align-associations` and `--align-assignments` enable
+their respective alignment; append `=false` to disable an option supplied by a
+project file. All three default to false. Width must be 1–10000, indentation
+0–32 spaces. Unknown options in `[format]`, invalid values, and unreadable
+selected configuration files are errors reported on stderr without formatted
+output.
 
 `inline_argument_limit` is shared by calls, function/procedure parameters,
 generic/port maps, generic/port interface lists, and aggregates containing named
@@ -103,16 +105,34 @@ assert false
     severity failure;
 ```
 
-Colons align in adjacent object/file declarations, interfaces and record fields.
-Arrows align in named port/generic map and aggregate associations; ordinary calls
-retain their spacing. Inline lists never receive column padding. Interfaces and
-maps align whenever they expand, whether because of width, comments or the
-argument limit. Named aggregates align when their item count exceeds the inline limit.
-Blank lines, standalone comments and other item kinds separate
-groups. Rows with internal/trailing comments or wrapped content do not contribute
-padding. Alignment falls back to ordinary spacing if the combined columns would
-exceed the configured width. Modes, types, defaults and assignments are not
-separately aligned.
+With `align_declarations`, adjacent object and interface declarations align `:`,
+explicit interface modes align their following types, and declarations with
+defaults align `:=`. Record fields and file declarations align their available
+columns. `align_associations` aligns arrows in named port/generic map and
+aggregate associations; ordinary calls retain their spacing.
+
+`align_assignments` aligns `<=` and `:=` together in adjacent simple assignments
+inside the same concurrent or sequential statement block. Labels, selected
+assignments, force/release assignments, control-flow statements, blank lines,
+standalone comments and multiline rows are boundaries. A trailing end-of-line
+comment may remain in an alignment group, while an internal comment ends it.
+Rows that cannot fit split a run so they do not widen otherwise-related
+neighbors. Inline lists never receive column padding, and alignment always falls
+back to ordinary spacing rather than forcing code past `max_width`.
+
+Context clauses retain their token order. A blank line separates library clauses
+from use clauses, and consecutive use clauses are visually grouped by their
+leading library name:
+
+```vhdl
+library IEEE, XESS;
+
+use IEEE.std_logic_1164.all;
+use IEEE.numeric_std.all;
+
+use XESS.CommonPckg.all;
+use XESS.AudioPckg.all;
+```
 
 Expressions prefer breaks between logical operands over breaks inside their
 comparisons, and between arithmetic terms over breaks inside their products.

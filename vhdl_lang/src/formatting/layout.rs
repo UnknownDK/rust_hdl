@@ -87,9 +87,9 @@ impl Doc {
         Self::leaf(Kind::Space, prefix, prefix)
     }
 
-    pub(crate) fn align() -> Self {
-        let prefix = Prefix::new(1, false);
-        Self::leaf(Kind::Align(1), prefix, prefix)
+    pub(crate) fn align(width: usize) -> Self {
+        let prefix = Prefix::new(width, false);
+        Self::leaf(Kind::Align(width), prefix, prefix)
     }
 
     pub(crate) fn is_space(&self) -> bool {
@@ -98,41 +98,55 @@ impl Doc {
 
     /// Only single-line rows participate. Widths are measured from documents,
     /// not source spacing or pre-rendered child buffers.
-    pub(crate) fn alignment_widths(&self) -> Option<(usize, usize)> {
+    /// Flat cell widths separated by alignment markers. Marker padding itself
+    /// is excluded so each column can be widened independently.
+    pub(crate) fn alignment_widths(&self) -> Option<Vec<usize>> {
         if self.flat.ends_line() {
             return None;
         }
-        self.alignment_column()
-            .map(|left| (left, self.flat.width() - left))
+        let mut widths = vec![0];
+        self.collect_alignment_widths(&mut widths);
+        (widths.len() > 1).then_some(widths)
     }
 
-    fn alignment_column(&self) -> Option<usize> {
+    fn collect_alignment_widths(&self, widths: &mut Vec<usize>) {
         match &self.kind {
-            Kind::Align(_) => Some(0),
-            Kind::Indent(_, child) => child.alignment_column(),
+            Kind::Align(_) => widths.push(0),
+            Kind::Indent(_, child) => child.collect_alignment_widths(widths),
+            Kind::IfBreak { flat, .. } => flat.collect_alignment_widths(widths),
             Kind::Group { children, .. } | Kind::Concat(children) => {
-                let mut width = 0usize;
                 for child in children {
-                    if let Some(column) = child.alignment_column() {
-                        return Some(width + column);
-                    }
-                    width += child.flat.width();
+                    child.collect_alignment_widths(widths);
                 }
-                None
             }
-            _ => None,
+            _ => *widths.last_mut().expect("one alignment cell") += self.flat.width(),
         }
     }
 
-    pub(crate) fn pad_alignment(&mut self, extra: usize) -> bool {
+    pub(crate) fn flat_width(&self) -> usize {
+        self.flat.width()
+    }
+
+    pub(crate) fn pad_alignments(&mut self, extras: &[usize]) -> bool {
+        let mut marker = 0;
+        self.pad_alignments_inner(extras, &mut marker)
+    }
+
+    fn pad_alignments_inner(&mut self, extras: &[usize], marker: &mut usize) -> bool {
         let changed = match &mut self.kind {
             Kind::Align(width) => {
+                let extra = extras.get(*marker).copied().unwrap_or(0);
+                *marker += 1;
                 *width += extra;
-                true
+                extra > 0
             }
-            Kind::Indent(_, child) => child.pad_alignment(extra),
+            Kind::Indent(_, child) => child.pad_alignments_inner(extras, marker),
             Kind::Group { children, .. } | Kind::Concat(children) => {
-                children.iter_mut().any(|child| child.pad_alignment(extra))
+                let mut changed = false;
+                for child in children {
+                    changed |= child.pad_alignments_inner(extras, marker);
+                }
+                changed
             }
             _ => false,
         };
@@ -156,14 +170,14 @@ impl Doc {
         changed
     }
 
-    pub(crate) fn pad_alignment_when_broken(&mut self, extra: usize) {
-        if extra == 0 {
+    pub(crate) fn pad_alignments_when_broken(&mut self, extras: &[usize]) {
+        if extras.iter().all(|extra| *extra == 0) {
             return;
         }
         // Only rows that actually need padding have two representations.
         // Neither branch is rendered while constructing the document.
         let mut padded = self.clone();
-        if padded.pad_alignment(extra) {
+        if padded.pad_alignments(extras) {
             let unpadded = std::mem::replace(self, Self::concat([]));
             let flat = unpadded.flat;
             let broken = padded.broken;
@@ -320,7 +334,11 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                 };
             }
             Kind::Space => space = space.max(usize::from(column != 0)),
-            Kind::Align(width) => space = space.max(if column == 0 { 0 } else { *width }),
+            Kind::Align(width) => {
+                if column != 0 {
+                    space = space.saturating_add(*width);
+                }
+            }
             Kind::IfBreak { flat, broken } => {
                 let branch = if matches!(mode, Mode::Flat) {
                     flat
@@ -474,11 +492,11 @@ mod tests {
     fn conditional_row_padding_does_not_force_a_list_to_wrap() {
         let mut row = Doc::concat([
             Doc::text("a"),
-            Doc::align(),
+            Doc::align(1),
             Doc::text("=> x,"),
             Doc::soft_line(true),
         ]);
-        row.pad_alignment_when_broken(5);
+        row.pad_alignments_when_broken(&[5]);
         let list = Doc::group(Doc::concat([
             Doc::text("("),
             Doc::indent(

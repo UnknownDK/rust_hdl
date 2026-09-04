@@ -23,7 +23,7 @@ pub struct Buffer {
     line_start: bool,
     group_starts: Vec<usize>,
     config: FormatConfig,
-    alignment_token: Option<TokenId>,
+    alignment_tokens: Vec<(TokenId, usize)>,
     /// Number of line breaks to emit before the next content.
     pending_line_breaks: usize,
     /// insert an extra newline before pushing a token.
@@ -47,7 +47,7 @@ impl Buffer {
             line_start: true,
             group_starts: Vec::new(),
             config,
-            alignment_token: None,
+            alignment_tokens: Vec::new(),
             pending_line_breaks: 0,
             insert_extra_newline: false,
             indentation: 0,
@@ -93,22 +93,32 @@ impl Buffer {
     }
 
     pub(crate) fn align_before(&mut self, id: TokenId) {
-        if self.alignment_token == Some(id) {
-            self.alignment_token = None;
-            if self.docs.last().is_some_and(Doc::is_space) {
+        if let Some(index) = self
+            .alignment_tokens
+            .iter()
+            .position(|(token, _)| *token == id)
+        {
+            let (_, width) = self.alignment_tokens.remove(index);
+            if width > 0 && self.docs.last().is_some_and(Doc::is_space) {
                 self.docs.pop();
             }
-            self.push_doc(Doc::align());
+            self.push_doc(Doc::align(width));
         }
     }
 
-    /// Build one alignment row, keeping leading comments outside its document.
-    pub(crate) fn alignment_row(&mut self, token: TokenId, build: impl FnOnce(&mut Self)) -> usize {
+    /// Build a row with multiple independently padded token columns. A width
+    /// of one replaces ordinary whitespace before a token; zero preserves the
+    /// formatter's existing soft line and adds only alignment padding.
+    pub(crate) fn alignment_row_targets(
+        &mut self,
+        tokens: &[(TokenId, usize)],
+        build: impl FnOnce(&mut Self),
+    ) -> usize {
         self.prepare_content();
         self.group_starts.push(self.docs.len());
-        let previous = self.alignment_token.replace(token);
+        let previous = std::mem::replace(&mut self.alignment_tokens, tokens.to_vec());
         build(self);
-        self.alignment_token = previous;
+        self.alignment_tokens = previous;
         let start = self.group_starts.pop().expect("balanced alignment rows");
         let docs = self.docs.split_off(start);
         self.push_doc(Doc::concat(docs));
@@ -120,10 +130,12 @@ impl Buffer {
             .config
             .max_width
             .saturating_sub(self.indentation.saturating_mul(self.config.indent_width));
-        let mut run = Vec::new();
+        let mut run: Vec<(usize, Vec<usize>)> = Vec::new();
         for &index in rows {
             match self.docs[index].alignment_widths() {
-                Some((left, right)) if left + right <= available => run.push((index, left, right)),
+                Some(widths) if self.docs[index].flat_width() <= available => {
+                    run.push((index, widths))
+                }
                 _ => {
                     self.align_run(&run, available, when_broken);
                     run.clear();
@@ -133,19 +145,51 @@ impl Buffer {
         self.align_run(&run, available, when_broken);
     }
 
-    fn align_run(&mut self, run: &[(usize, usize, usize)], available: usize, when_broken: bool) {
-        let left = run.iter().map(|row| row.1).max().unwrap_or(0);
-        let right = run.iter().map(|row| row.2).max().unwrap_or(0);
-        if left + right <= available {
-            for &(index, width, _) in run {
-                if when_broken {
-                    self.docs[index].pad_alignment_when_broken(left - width);
-                } else {
-                    self.docs[index].pad_alignment(left - width);
-                }
-            }
-            self.rendered.take();
+    fn align_run(&mut self, run: &[(usize, Vec<usize>)], available: usize, when_broken: bool) {
+        if run.len() < 2 {
+            return;
         }
+        let columns = run
+            .iter()
+            .map(|(_, widths)| widths.len().saturating_sub(1))
+            .max()
+            .unwrap_or(0);
+        let maxima: Vec<_> = (0..columns)
+            .map(|column| {
+                run.iter()
+                    .filter(|(_, widths)| widths.len() > column + 1)
+                    .filter_map(|(_, widths)| widths.get(column))
+                    .copied()
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let extras = |widths: &[usize]| -> Vec<_> {
+            maxima
+                .iter()
+                .zip(&widths[..widths.len().saturating_sub(1)])
+                .map(|(maximum, width)| maximum - width)
+                .collect()
+        };
+        if let Some(failed) = run.iter().position(|(index, widths)| {
+            self.docs[*index]
+                .flat_width()
+                .saturating_add(extras(widths).into_iter().sum::<usize>())
+                > available
+        }) {
+            self.align_run(&run[..failed], available, when_broken);
+            self.align_run(&run[failed + 1..], available, when_broken);
+            return;
+        }
+        for (index, widths) in run {
+            let extras = extras(widths);
+            if when_broken {
+                self.docs[*index].pad_alignments_when_broken(&extras);
+            } else {
+                self.docs[*index].pad_alignments(&extras);
+            }
+        }
+        self.rendered.take();
     }
 
     pub fn as_str(&self) -> &str {

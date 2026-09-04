@@ -55,7 +55,7 @@ fn readability_rules_work_across_language_versions() {
 }
 
 #[test]
-fn wide_aggregate_rows_disable_padding_instead_of_exceeding_width() {
+fn wide_aggregate_rows_split_the_run_without_widening_neighbors() {
     let source = process("x <= (a => a_long_value, longer_name => 0, c => 1);");
     let output = checked(
         &source,
@@ -67,7 +67,7 @@ fn wide_aggregate_rows_disable_padding_instead_of_exceeding_width() {
     );
     assert!(
         output.contains(
-            "            a => a_long_value,\n            longer_name => 0,\n            c => 1"
+            "            a => a_long_value,\n            longer_name => 0,\n            c           => 1"
         ),
         "{output}"
     );
@@ -237,7 +237,7 @@ fn context_separation_covers_all_design_units_but_not_context_bodies() {
         let source = format!("library lib; use lib.pkg.all;\n-- unit docs\n{unit}");
         let output = checked(&source, FormatConfig::default());
         assert!(
-            output.starts_with("library lib;\nuse lib.pkg.all;\n\n-- unit docs\n"),
+            output.starts_with("library lib;\n\nuse lib.pkg.all;\n\n-- unit docs\n"),
             "{output}"
         );
     }

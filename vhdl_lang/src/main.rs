@@ -91,6 +91,10 @@ struct Args {
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     align_associations: Option<bool>,
 
+    /// Align assignment operators in adjacent simple statements (pass false to override project settings).
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+    align_assignments: Option<bool>,
+
     /// Inline limit for calls, interfaces, maps and named aggregates (default: 2; 0 expands).
     #[arg(long)]
     inline_argument_limit: Option<usize>,
@@ -206,6 +210,9 @@ fn formatter_settings(args: &Args) -> Result<(FormatConfig, VHDLStandard), CliFo
     }
     if let Some(align) = args.align_associations {
         config.align_associations = align;
+    }
+    if let Some(align) = args.align_assignments {
+        config.align_assignments = align;
     }
     if let Some(limit) = args.inline_argument_limit {
         config.inline_argument_limit = limit;
