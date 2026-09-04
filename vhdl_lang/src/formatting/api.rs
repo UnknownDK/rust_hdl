@@ -2,16 +2,44 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at http://mozilla.org/MPL/2.0/.
 
-use super::VHDLFormatter;
+use super::{FormatConfig, VHDLFormatter};
 use crate::ast::DesignFile;
+use crate::syntax::Value;
 use crate::{Diagnostic, Source, VHDLParser};
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
 
+/// Format raw source text, preserving original disabled-region text (including
+/// CRLF line endings) before `Source` performs its normal newline normalization.
+pub fn format_text_with_config(
+    parser: &VHDLParser,
+    path: &std::path::Path,
+    text: &str,
+    config: &FormatConfig,
+) -> Result<String, FormatError> {
+    let disabled = super::disabled::DisabledRegions::new(text);
+    if disabled.is_empty() {
+        return format_source_with_config(parser, &Source::inline(path, text), config);
+    }
+    let source = Source::inline(path, text);
+    let masked = Source::inline(path, &disabled.masked);
+    match format_source_with_config(parser, &masked, config) {
+        Ok(output) => disabled
+            .restore(&output)
+            .ok_or(FormatError::DisabledRegionMismatch),
+        Err(FormatError::InputDiagnostics(mut diagnostics)) => {
+            disabled.remap_diagnostics(&mut diagnostics, &source, text);
+            Err(FormatError::InputDiagnostics(diagnostics))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// An error encountered while formatting or validating a VHDL source.
 #[derive(Debug)]
 pub enum FormatError {
+    DisabledRegionMismatch,
     InputDiagnostics(Vec<Diagnostic>),
     OutputDiagnostics(Vec<Diagnostic>),
     DesignUnitCountMismatch {
@@ -35,6 +63,9 @@ pub enum FormatError {
 impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::DisabledRegionMismatch => {
+                write!(f, "formatted output lost a disabled-region anchor")
+            }
             Self::InputDiagnostics(diagnostics) => write!(
                 f,
                 "input contains {} parse diagnostic(s)",
@@ -72,32 +103,58 @@ impl Error for FormatError {}
 
 /// Format an in-memory VHDL source and verify that significant tokens are preserved.
 pub fn format_source(parser: &VHDLParser, source: &Source) -> Result<String, FormatError> {
+    format_source_with_config(parser, source, &FormatConfig::default())
+}
+
+/// Format and verify a source using explicit style options.
+pub fn format_source_with_config(
+    parser: &VHDLParser,
+    source: &Source,
+    config: &FormatConfig,
+) -> Result<String, FormatError> {
     let source_text = {
         let contents = source.contents();
         (0..contents.num_lines())
             .filter_map(|line| contents.get_line(line))
             .collect::<String>()
     };
-    // The tokenizer intentionally omits disabled regions, so formatting their AST would
-    // silently delete source text. Preserve such files until disabled regions are lossless.
-    if source_text.to_ascii_lowercase().contains("vhdl_ls off") {
-        return Ok(source_text);
-    }
+    let disabled = super::disabled::DisabledRegions::new(&source_text);
+    let original_source = source;
+    let masked_source;
+    let source = if disabled.is_empty() {
+        source
+    } else {
+        masked_source = Source::inline(source.file_name(), &disabled.masked);
+        &masked_source
+    };
 
     let mut diagnostics = Vec::new();
     let input = parser.parse_design_source(source, &mut diagnostics);
     if !diagnostics.is_empty() {
+        disabled.remap_diagnostics(&mut diagnostics, original_source, &source_text);
         return Err(FormatError::InputDiagnostics(diagnostics));
     }
 
-    let output = VHDLFormatter::format_design_file(&input);
-    verify_output(parser, source, &input, &output)?;
-    Ok(output)
+    let output = VHDLFormatter::format_design_file_with_config(&input, config);
+    let input_text = if disabled.is_empty() {
+        &source_text
+    } else {
+        &disabled.masked
+    };
+    verify_output(parser, source, input_text, &input, &output)?;
+    if disabled.is_empty() {
+        Ok(output)
+    } else {
+        disabled
+            .restore(&output)
+            .ok_or(FormatError::DisabledRegionMismatch)
+    }
 }
 
 fn verify_output(
     parser: &VHDLParser,
     source: &Source,
+    input_text: &str,
     input: &DesignFile,
     output: &str,
 ) -> Result<(), FormatError> {
@@ -105,8 +162,8 @@ fn verify_output(
     output_path.as_mut_os_string().push(".rust_hdl_formatted");
 
     let mut diagnostics = Vec::new();
-    let output_file =
-        parser.parse_design_source(&Source::inline(&output_path, output), &mut diagnostics);
+    let output_source = Source::inline(&output_path, output);
+    let output_file = parser.parse_design_source(&output_source, &mut diagnostics);
     if !diagnostics.is_empty() {
         return Err(FormatError::OutputDiagnostics(diagnostics));
     }
@@ -118,6 +175,8 @@ fn verify_output(
         });
     }
 
+    let mut input_reader = SpellingCursor::new(input_text);
+    let mut output_reader = SpellingCursor::new(output);
     for (design_unit, ((input_tokens, _), (output_tokens, _))) in input
         .design_units
         .iter()
@@ -135,7 +194,14 @@ fn verify_output(
         for (token, (input_token, output_token)) in
             input_tokens.iter().zip(output_tokens).enumerate()
         {
-            if !input_token.equal_format(output_token) {
+            if !input_token.equal_format(output_token)
+                || !same_spelling(
+                    &mut input_reader,
+                    input_token,
+                    &mut output_reader,
+                    output_token,
+                )
+            {
                 return Err(FormatError::TokenMismatch { design_unit, token });
             }
         }
@@ -148,10 +214,11 @@ fn verify_output(
             comment: input_comments.len().min(output_comments.len()),
         });
     }
-    for (comment, (input_comment, output_comment)) in
+    for (comment, ((input_gap, input_comment), (output_gap, output_comment))) in
         input_comments.iter().zip(output_comments).enumerate()
     {
-        if input_comment.value != output_comment.value
+        if *input_gap != output_gap
+            || input_comment.value != output_comment.value
             || input_comment.multi_line != output_comment.multi_line
         {
             return Err(FormatError::CommentMismatch { comment });
@@ -161,16 +228,98 @@ fn verify_output(
     Ok(())
 }
 
-fn comments(file: &DesignFile) -> Vec<&crate::syntax::Comment> {
+/// Source slices preserve spelling without allocating per-token strings. ASCII
+/// lines use direct offsets; UTF-16 positions on other lines use forward-only
+/// cursors, so even a long non-ASCII line is scanned at most once.
+struct SpellingCursor<'a> {
+    text: &'a str,
+    lines: Vec<(usize, bool)>,
+    line: usize,
+    character: u32,
+    offset: usize,
+}
+
+impl<'a> SpellingCursor<'a> {
+    fn new(text: &'a str) -> Self {
+        let mut start = 0;
+        let mut lines = Vec::new();
+        for line in text.split_inclusive('\n') {
+            lines.push((start, line.is_ascii()));
+            start += line.len();
+        }
+        lines.push((text.len(), true));
+        Self {
+            text,
+            lines,
+            line: 0,
+            character: 0,
+            offset: 0,
+        }
+    }
+
+    fn offset(&mut self, pos: crate::Position) -> usize {
+        let line = pos.line as usize;
+        let (start, ascii) = self.lines[line];
+        if ascii {
+            return start + pos.character as usize;
+        }
+        if self.line != line {
+            self.line = line;
+            self.character = 0;
+            self.offset = start;
+        }
+        for ch in self.text[self.offset..].chars() {
+            if self.character >= pos.character {
+                break;
+            }
+            self.character += ch.len_utf16() as u32;
+            self.offset += ch.len_utf8();
+        }
+        self.offset
+    }
+
+    fn token(&mut self, token: &crate::Token) -> &'a str {
+        let start = self.offset(token.pos.start());
+        let end = self.offset(token.pos.end());
+        &self.text[start..end]
+    }
+}
+
+fn same_spelling(
+    left: &mut SpellingCursor<'_>,
+    a: &crate::Token,
+    right: &mut SpellingCursor<'_>,
+    b: &crate::Token,
+) -> bool {
+    let left = left.token(a);
+    let right = right.token(b);
+    if matches!(a.value, Value::None) {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
+/// A comment must remain in the same gap between significant tokens. Leading
+/// versus trailing attachment may change when wrapping, but crossing a token
+/// (and therefore an expression or statement) is rejected.
+fn comments(file: &DesignFile) -> Vec<(usize, &crate::syntax::Comment)> {
     let mut comments = Vec::new();
+    let mut gap = 0;
     for (tokens, _) in &file.design_units {
         for token in tokens {
             if let Some(token_comments) = &token.comments {
-                comments.extend(&token_comments.leading);
-                comments.extend(&token_comments.trailing);
+                comments.extend(token_comments.leading.iter().map(|comment| (gap, comment)));
+                comments.extend(
+                    token_comments
+                        .trailing
+                        .iter()
+                        .map(|comment| (gap + 1, comment)),
+                );
             }
+            gap += 1;
         }
     }
-    comments.extend(&file.final_comments);
+    comments.extend(file.final_comments.iter().map(|comment| (gap, comment)));
     comments
 }

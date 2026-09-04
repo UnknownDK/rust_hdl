@@ -32,6 +32,20 @@ impl VHDLFormatter<'_> {
         }
     }
 
+    /// A short keyword/name prefix with legal whitespace breaks, used by
+    /// subprogram specifications when even the name does not fit after a keyword.
+    pub(crate) fn format_wrapped_token_span(&self, span: TokenSpan, buffer: &mut Buffer) {
+        buffer.fill_group(|buffer| {
+            self.format_token_id(span.start_token, buffer);
+            buffer.with_indent(|buffer| {
+                for id in span.iter().skip(1) {
+                    buffer.soft_line();
+                    self.format_token_id(id, buffer);
+                }
+            });
+        });
+    }
+
     pub(crate) fn format_ident(&self, ident: &WithDecl<Ident>, buffer: &mut Buffer) {
         self.format_token_id(ident.tree.token, buffer)
     }

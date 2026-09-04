@@ -47,7 +47,7 @@ impl VHDLFormatter<'_> {
         buffer: &mut Buffer,
     ) {
         // procedure <name>
-        self.format_token_span(
+        self.format_wrapped_token_span(
             TokenSpan::new(
                 specification.span.start_token,
                 specification.designator.tree.token,
@@ -74,36 +74,47 @@ impl VHDLFormatter<'_> {
         specification: &FunctionSpecification,
         buffer: &mut Buffer,
     ) {
-        // function <name>
-        self.format_token_span(
-            TokenSpan::new(
-                specification.span.start_token,
-                specification.designator.tree.token,
-            ),
-            buffer,
-        );
-        if let Some(header) = &specification.header {
-            self.format_subprogram_header(header, buffer);
-        }
-        if let Some(parameter) = &specification.parameter_list {
-            self.format_interface_list(parameter, buffer);
-        }
-        buffer.push_whitespace();
-        if let Some(return_identifier) = &specification.return_identifier {
-            // return <identifier> of
-            self.format_token_span(
+        buffer.group(|buffer| {
+            // function <name>
+            self.format_wrapped_token_span(
                 TokenSpan::new(
-                    return_identifier.tree.token - 1,
-                    specification.return_type.span.start_token - 1,
+                    specification.span.start_token,
+                    specification.designator.tree.token,
                 ),
                 buffer,
             );
-        } else {
-            // return
-            self.format_token_id(specification.return_type.span.start_token - 1, buffer);
-        }
-        buffer.push_whitespace();
-        self.format_name(specification.return_type.as_ref(), buffer);
+            if let Some(header) = &specification.header {
+                self.format_subprogram_header(header, buffer);
+            }
+            if let Some(parameter) = &specification.parameter_list {
+                self.format_interface_list(parameter, buffer);
+            }
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                buffer.group(|buffer| {
+                    if let Some(return_identifier) = &specification.return_identifier {
+                        // return <identifier> of
+                        self.format_token_span(
+                            TokenSpan::new(
+                                return_identifier.tree.token - 1,
+                                specification.return_type.span.start_token - 1,
+                            ),
+                            buffer,
+                        );
+                    } else {
+                        // return
+                        self.format_token_id(
+                            specification.return_type.span.start_token - 1,
+                            buffer,
+                        );
+                    }
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_line();
+                        self.format_name(specification.return_type.as_ref(), buffer);
+                    });
+                });
+            });
+        });
     }
 
     pub fn format_subprogram_header(&self, header: &SubprogramHeader, buffer: &mut Buffer) {

@@ -5,15 +5,24 @@
 //
 // Copyright (c) 2024, Olof Kraigher olof.kraigher@gmail.com
 
+use super::{
+    layout::{self, Doc},
+    FormatConfig, KeywordCase,
+};
 use crate::syntax::{Comment, Value};
 use crate::{kind_str, Token};
-use std::iter;
+use std::cell::OnceCell;
 
-/// The Buffer is the (mostly) mutable object used to write tokens to a string.
-/// It operates mostly on tokens and is capable of indenting,
-/// de-indenting and keeping the indentation level.
+/// Builds a nested document from tokens, comments and structural whitespace.
+/// Rendering is deferred until the completed document is requested.
 pub struct Buffer {
-    inner: String,
+    docs: Vec<Doc>,
+    rendered: OnceCell<String>,
+    has_content: bool,
+    last_whitespace: bool,
+    line_start: bool,
+    group_starts: Vec<usize>,
+    config: FormatConfig,
     /// Number of line breaks to emit before the next content.
     pending_line_breaks: usize,
     /// insert an extra newline before pushing a token.
@@ -21,23 +30,25 @@ pub struct Buffer {
     insert_extra_newline: bool,
     /// The current indentation level
     indentation: usize,
-    /// The char used for indentation
-    indent_char: char,
-    /// The width used at each indentation level
-    indent_width: usize,
 }
 
 impl Buffer {
-    const MAX_WIDTH: usize = 100;
-
     pub fn new() -> Buffer {
+        Self::with_config(FormatConfig::default())
+    }
+
+    pub fn with_config(config: FormatConfig) -> Buffer {
         Buffer {
-            inner: String::new(),
+            docs: Vec::new(),
+            rendered: OnceCell::new(),
+            has_content: false,
+            last_whitespace: false,
+            line_start: true,
+            group_starts: Vec::new(),
+            config,
             pending_line_breaks: 0,
             insert_extra_newline: false,
             indentation: 0,
-            indent_char: ' ',
-            indent_width: 4,
         }
     }
 }
@@ -65,35 +76,39 @@ fn leading_comment_is_on_token_line(comment: &Comment, token: &Token) -> bool {
 
 impl From<Buffer> for String {
     fn from(mut value: Buffer) -> Self {
-        value.flush_line_breaks(false);
-        value.inner
+        value.flush_line_breaks();
+        layout::render_docs(
+            &value.docs,
+            value.config.indent_width,
+            value.config.max_width,
+        )
     }
 }
 
 impl Buffer {
     pub fn as_str(&self) -> &str {
-        self.inner.as_str()
+        self.rendered.get_or_init(|| {
+            layout::render_docs(&self.docs, self.config.indent_width, self.config.max_width)
+        })
     }
 
     /// pushes a whitespace character to the buffer
     pub fn push_whitespace(&mut self) {
         if !self.insert_extra_newline
             && self.pending_line_breaks == 0
-            && !self.inner.is_empty()
-            && !self.inner.ends_with(char::is_whitespace)
+            && self.has_content
+            && !self.last_whitespace
         {
-            self.inner.push(' ');
+            self.push_doc(Doc::space());
+            self.last_whitespace = true;
         }
     }
 
     fn format_comment(&mut self, comment: &Comment) {
         if !comment.multi_line {
-            self.push_str("--");
-            self.push_str(&comment.value)
+            self.push_text(format!("--{}", comment.value));
         } else {
-            self.push_str("/*");
-            self.push_str(&comment.value);
-            self.push_str("*/");
+            self.push_text(format!("/*{}*/", comment.value));
         }
     }
 
@@ -110,29 +125,22 @@ impl Buffer {
         }
     }
 
-    fn indent(&mut self) {
-        self.inner.extend(iter::repeat_n(
-            self.indent_char,
-            self.indent_width * self.indentation,
-        ));
-    }
-
-    fn flush_line_breaks(&mut self, indent: bool) {
+    fn flush_line_breaks(&mut self) {
         if self.pending_line_breaks == 0 {
             return;
         }
-        if !self.inner.is_empty() {
-            self.inner
-                .extend(iter::repeat_n('\n', self.pending_line_breaks));
+        if self.has_content {
+            for _ in 0..self.pending_line_breaks {
+                self.push_doc(Doc::hard_line());
+            }
         }
         self.pending_line_breaks = 0;
-        if indent && !self.inner.is_empty() {
-            self.indent();
-        }
+        self.last_whitespace = true;
+        self.line_start = true;
     }
 
     fn prepare_content(&mut self) {
-        self.flush_line_breaks(true);
+        self.flush_line_breaks();
     }
 
     /// Push a token to this buffer.
@@ -142,6 +150,7 @@ impl Buffer {
             self.line_break();
         }
         self.insert_extra_newline = false;
+        let leading_start = self.docs.len();
         if let Some(comments) = &token.comments {
             // This is for example the case for situations like
             // some_token /* comment in between */ some_other token
@@ -151,33 +160,39 @@ impl Buffer {
                 self.format_comment(&comments.leading[0]);
                 self.push_ch(' ');
             } else if !comments.leading.is_empty() {
+                // A standalone leading comment stays before this token, not
+                // after the previous token when an enclosing group flattens.
+                if self.has_content && !self.line_start && self.pending_line_breaks == 0 {
+                    self.line_break();
+                }
                 self.format_comments(comments.leading.as_slice());
-            }
-        }
-        match &token.value {
-            Value::Identifier(ident) => self.push_str(&ident.to_string()),
-            Value::String(string) => {
-                self.push_ch('"');
-                for byte in &string.bytes {
-                    if *byte == b'"' {
-                        self.push_ch('"');
-                        self.push_ch('"');
-                    } else {
-                        self.push_ch(*byte as char);
+                self.flush_line_breaks();
+                // Leading comments belong before, not inside, a layout group
+                // that starts at this token. They must not force the following
+                // otherwise-short statement to break.
+                for start in &mut self.group_starts {
+                    if *start == leading_start {
+                        *start = self.docs.len();
                     }
                 }
-                self.push_ch('"');
             }
-            Value::BitString(value, _) => self.push_str(&value.to_string()),
-            Value::AbstractLiteral(value, _) => self.push_str(&value.to_string()),
-            Value::Character(char) => {
-                self.push_ch('\'');
-                self.push_ch(*char as char);
-                self.push_ch('\'');
-            }
-            Value::Text(text) => self.push_str(&text.to_string()),
-            Value::None => self.push_str(kind_str(token.kind)),
         }
+        let spelling = match &token.value {
+            Value::Identifier(ident) => ident.to_string(),
+            Value::String(string) => format!("\"{}\"", string.to_string().replace('"', "\"\"")),
+            Value::BitString(value, _) | Value::AbstractLiteral(value, _) => value.to_string(),
+            Value::Character(ch) => format!("'{}'", *ch as char),
+            Value::Text(text) => text.to_string(),
+            Value::None => {
+                // Token kinds, never identifier text, decide case conversion.
+                let spelling = kind_str(token.kind);
+                match self.config.keyword_case {
+                    KeywordCase::Lower => spelling.to_owned(),
+                    KeywordCase::Upper => spelling.to_ascii_uppercase(),
+                }
+            }
+        };
+        self.push_text(spelling);
         if let Some(comments) = &token.comments {
             if let Some(trailing_comment) = &comments.trailing {
                 self.push_ch(' ');
@@ -188,18 +203,26 @@ impl Buffer {
     }
 
     fn push_str(&mut self, value: &str) {
+        self.push_text(value.to_owned());
+    }
+
+    fn push_text(&mut self, value: String) {
         self.prepare_content();
-        self.inner.push_str(value);
+        if !value.is_empty() {
+            self.has_content = true;
+            self.last_whitespace = value.ends_with(char::is_whitespace);
+            self.line_start = value.ends_with('\n');
+            self.push_doc(Doc::text_at(self.indentation, value));
+        }
     }
 
     fn push_ch(&mut self, char: char) {
-        self.prepare_content();
-        self.inner.push(char);
+        self.push_str(&char.to_string());
     }
 
     /// Increase the indentation level.
-    /// After this call, all new-line pushes will be preceded by an indentation,
-    /// specified via the `indent_char` and `indent_width` properties.
+    /// Indentation is emitted lazily at the start of rendered content lines,
+    /// using the configured indentation width.
     ///
     /// This call should always be matched with a `decrease_indent` call.
     /// There is also the `indented` macro that combines the two calls.
@@ -221,15 +244,56 @@ impl Buffer {
         result
     }
 
-    pub(crate) fn push_doc(&mut self, doc: &super::layout::Doc) {
+    fn push_doc(&mut self, doc: Doc) {
+        self.rendered.take();
+        self.docs.push(doc);
+    }
+
+    /// Compose a nested document without rendering any child buffer.
+    pub(crate) fn group<R>(&mut self, build: impl FnOnce(&mut Self) -> R) -> R {
+        self.group_with(build, false, false)
+    }
+
+    pub(crate) fn fill_group<R>(&mut self, build: impl FnOnce(&mut Self) -> R) -> R {
+        self.group_with(build, true, false)
+    }
+
+    pub(crate) fn expression_group<R>(&mut self, build: impl FnOnce(&mut Self) -> R) -> R {
+        self.group_with(build, false, true)
+    }
+
+    fn group_with<R>(&mut self, build: impl FnOnce(&mut Self) -> R, fill: bool, anchor: bool) -> R {
         self.prepare_content();
-        super::layout::render(
-            doc,
-            &mut self.inner,
-            self.indentation,
-            self.indent_width,
-            Self::MAX_WIDTH,
-        );
+        self.group_starts.push(self.docs.len());
+        let indent = self.indentation;
+        let result = build(self);
+        let start = self.group_starts.pop().expect("balanced document groups");
+        let children = self.docs.split_off(start);
+        let doc = Doc::concat(children);
+        self.push_doc(Doc::indent(
+            indent,
+            if anchor {
+                Doc::expression_group(doc)
+            } else if fill {
+                Doc::fill_group(doc)
+            } else {
+                Doc::group(doc)
+            },
+        ));
+        result
+    }
+
+    pub(crate) fn soft_line(&mut self) {
+        self.soft_break(true);
+    }
+
+    pub(crate) fn soft_break(&mut self, space: bool) {
+        if self.insert_extra_newline || self.pending_line_breaks > 0 {
+            self.line_break();
+        } else {
+            self.push_doc(Doc::soft_line(space));
+            self.last_whitespace = true;
+        }
     }
 
     /// Inserts a line break (i.e., newline) at the current position

@@ -9,8 +9,8 @@ use itertools::Itertools;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use vhdl_lang::{
-    format_source, Config, Diagnostic, FormatError, MessagePrinter, Project, Severity, SeverityMap,
-    Source, VHDLParser, VHDLStandard,
+    format_text_with_config, Config, Diagnostic, FormatConfig, FormatError, KeywordCase,
+    Latin1String, MessagePrinter, Project, Severity, SeverityMap, VHDLParser, VHDLStandard,
 };
 
 #[derive(Debug, clap::Args)]
@@ -48,18 +48,35 @@ struct Args {
     #[arg(long, requires = "format_stdin")]
     stdin_filepath: Option<PathBuf>,
 
+    /// Preferred formatter line width (unbreakable text may exceed this).
+    #[arg(long, default_value_t = 100)]
+    max_width: usize,
+
+    /// Spaces per formatter indentation level.
+    #[arg(long, default_value_t = 4)]
+    indent_width: usize,
+
+    /// Case of reserved words; identifiers, literals and comments are unchanged.
+    #[arg(long, value_enum, default_value_t = KeywordCase::Lower)]
+    keyword_case: KeywordCase,
+
     #[clap(flatten)]
     group: Group,
 }
 
 fn main() {
     let args = Args::parse();
+    let format_config = FormatConfig {
+        max_width: args.max_width,
+        indent_width: args.indent_width,
+        keyword_case: args.keyword_case,
+    };
     if let Some(config_path) = args.group.config {
         parse_and_analyze_project(&config_path, args.num_threads, args.libraries.as_ref());
     } else if let Some(format) = args.group.format {
-        run_formatter(format_file(&format));
+        run_formatter(format_file(&format, &format_config));
     } else if args.group.format_stdin {
-        run_formatter(format_stdin(args.stdin_filepath.as_deref()));
+        run_formatter(format_stdin(args.stdin_filepath.as_deref(), &format_config));
     }
 }
 
@@ -74,18 +91,22 @@ fn run_formatter(result: Result<(), CliFormatError>) {
     }
 }
 
-fn format_file(path: &Path) -> Result<(), CliFormatError> {
+fn format_file(path: &Path, config: &FormatConfig) -> Result<(), CliFormatError> {
     let parser = VHDLParser::new(VHDLStandard::default());
-    let source = Source::from_latin1_file(path)?;
-    write_stdout(&format_source(&parser, &source)?)
+    let input = Latin1String::from_vec(std::fs::read(path)?).to_string();
+    write_stdout(&format_text_with_config(&parser, path, &input, config)?)
 }
 
-fn format_stdin(path: Option<&Path>) -> Result<(), CliFormatError> {
+fn format_stdin(path: Option<&Path>, config: &FormatConfig) -> Result<(), CliFormatError> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    let source = Source::inline(path.unwrap_or_else(|| Path::new("<stdin>.vhd")), &input);
     let parser = VHDLParser::new(VHDLStandard::default());
-    write_stdout(&format_source(&parser, &source)?)
+    write_stdout(&format_text_with_config(
+        &parser,
+        path.unwrap_or_else(|| Path::new("<stdin>.vhd")),
+        &input,
+        config,
+    )?)
 }
 
 fn write_stdout(output: &str) -> Result<(), CliFormatError> {

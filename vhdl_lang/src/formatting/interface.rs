@@ -12,7 +12,6 @@ use crate::ast::{
     ModeViewIndicationKind, SeparatedList, SimpleModeIndication, SubprogramDefault,
 };
 use crate::formatting::buffer::Buffer;
-use crate::formatting::layout::Doc;
 use crate::formatting::VHDLFormatter;
 use crate::syntax::Kind;
 use crate::{HasTokenSpan, TokenAccess};
@@ -24,60 +23,38 @@ impl VHDLFormatter<'_> {
     pub(crate) fn format_interface_list(&self, clause: &InterfaceList, buffer: &mut Buffer) {
         let span = clause.span;
         let end_token = if self.tokens.index(span.start_token).kind == Kind::LeftPar {
-            // We start with a `(` immediately
-            // applicable for parameters (though VHDL 2008 allows an optional `parameter` keyword)
             span.start_token
         } else {
-            // We start with a `generic`, `port` or `parameter` keyword
             span.start_token + 1
         };
-        // port (
-        // generic (
-        // parameter (
-        // (
-        let open = self.capture(|formatter, buffer| {
-            formatter.format_token_span(TokenSpan::new(span.start_token, end_token), buffer)
-        });
-        let close = self.capture(|formatter, buffer| {
-            if formatter.tokens.index(span.end_token).kind == Kind::SemiColon {
-                formatter.format_token_id(span.end_token - 1, buffer);
-                formatter.format_token_id(span.end_token, buffer);
-            } else {
-                formatter.format_token_id(span.end_token, buffer);
-            }
-        });
-        let line = if clause.items.len() == 1 {
-            Doc::SoftLine
-        } else {
-            Doc::HardLine
-        };
-        let mut items = Vec::new();
-        for (i, item) in clause.items.iter().enumerate() {
-            if i > 0 {
-                items.push(Doc::HardLine);
-            }
-            items.push(Doc::text(self.capture(|formatter, buffer| {
-                formatter.format_interface_declaration(item, buffer);
-                if i < clause.items.len() - 1 {
-                    formatter.format_token_id(item.get_end_token() + 1, buffer);
-                }
-            })));
-        }
-        let doc = if clause.items.is_empty() {
-            Doc::concat([Doc::text(open), Doc::text(close)])
-        } else {
-            Doc::group(Doc::concat([
-                Doc::text(open),
-                Doc::indent(Doc::concat([line, Doc::concat(items)])),
+        buffer.group(|buffer| {
+            self.format_token_span(TokenSpan::new(span.start_token, end_token), buffer);
+            if !clause.items.is_empty() {
+                buffer.with_indent(|buffer| {
+                    if clause.items.len() == 1 {
+                        buffer.soft_line();
+                    } else {
+                        buffer.line_break();
+                    }
+                    for (i, item) in clause.items.iter().enumerate() {
+                        self.format_interface_declaration(item, buffer);
+                        if i < clause.items.len() - 1 {
+                            self.format_token_id(item.get_end_token() + 1, buffer);
+                            buffer.line_break();
+                        }
+                    }
+                });
                 if clause.items.len() == 1 {
-                    Doc::SoftLine
+                    buffer.soft_line();
                 } else {
-                    Doc::HardLine
-                },
-                Doc::text(close),
-            ]))
-        };
-        buffer.push_doc(&doc);
+                    buffer.line_break();
+                }
+            }
+            if self.tokens.index(span.end_token).kind == Kind::SemiColon {
+                self.format_token_id(span.end_token - 1, buffer);
+            }
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_map_aspect_span(
@@ -86,48 +63,36 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        // port map (
-        // generic map (
-        let open = self.capture(|formatter, buffer| {
-            formatter.format_token_span(
+        buffer.group(|buffer| {
+            self.format_token_span(
                 TokenSpan::new(span.start_token, span.start_token + 2),
                 buffer,
-            )
-        });
-        let close =
-            self.capture(|formatter, buffer| formatter.format_token_id(span.end_token, buffer));
-        let mut items = Vec::new();
-        for (i, item) in list.items.iter().enumerate() {
-            if i > 0 {
-                items.push(Doc::HardLine);
-            }
-            items.push(Doc::text(self.capture(|formatter, buffer| {
-                formatter.format_association_element(item, buffer);
-                if let Some(token) = list.tokens.get(i) {
-                    formatter.format_token_id(*token, buffer);
-                }
-            })));
-        }
-        let line = if list.items.len() == 1 {
-            Doc::SoftLine
-        } else {
-            Doc::HardLine
-        };
-        let doc = if list.items.is_empty() {
-            Doc::concat([Doc::text(open), Doc::text(close)])
-        } else {
-            Doc::group(Doc::concat([
-                Doc::text(open),
-                Doc::indent(Doc::concat([line, Doc::concat(items)])),
+            );
+            if !list.items.is_empty() {
+                buffer.with_indent(|buffer| {
+                    if list.items.len() == 1 {
+                        buffer.soft_line();
+                    } else {
+                        buffer.line_break();
+                    }
+                    for (i, item) in list.items.iter().enumerate() {
+                        self.format_association_element(item, buffer);
+                        if let Some(token) = list.tokens.get(i) {
+                            self.format_token_id(*token, buffer);
+                        }
+                        if i + 1 < list.items.len() {
+                            buffer.line_break();
+                        }
+                    }
+                });
                 if list.items.len() == 1 {
-                    Doc::SoftLine
+                    buffer.soft_line();
                 } else {
-                    Doc::HardLine
-                },
-                Doc::text(close),
-            ]))
-        };
-        buffer.push_doc(&doc);
+                    buffer.line_break();
+                }
+            }
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_map_aspect(&self, aspect: &MapAspect, buffer: &mut Buffer) {
@@ -135,13 +100,19 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_association_element(&self, element: &AssociationElement, buffer: &mut Buffer) {
-        if let Some(formal) = &element.formal {
-            self.format_name(formal.as_ref(), buffer);
-            buffer.push_whitespace();
-            self.format_token_id(formal.span.end_token + 1, buffer);
-            buffer.push_whitespace();
-        }
-        self.format_actual_part(&element.actual, buffer)
+        buffer.fill_group(|buffer| {
+            if let Some(formal) = &element.formal {
+                self.format_name(formal.as_ref(), buffer);
+                buffer.push_whitespace();
+                self.format_token_id(formal.span.end_token + 1, buffer);
+                buffer.with_indent(|buffer| {
+                    buffer.soft_line();
+                    self.format_actual_part(&element.actual, buffer);
+                });
+            } else {
+                self.format_actual_part(&element.actual, buffer);
+            }
+        });
     }
 
     pub fn format_actual_part(&self, actual_part: &WithTokenSpan<ActualPart>, buffer: &mut Buffer) {
@@ -248,14 +219,18 @@ impl VHDLFormatter<'_> {
         object: &InterfaceObjectDeclaration,
         buffer: &mut Buffer,
     ) {
-        // [signal] my_signal :
-        self.format_token_span(
-            TokenSpan::new(object.span.start_token, object.colon_token - 1),
-            buffer,
-        );
-        self.format_token_id(object.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_mode(&object.mode, buffer);
+        buffer.fill_group(|buffer| {
+            // [signal] my_signal :
+            self.format_token_span(
+                TokenSpan::new(object.span.start_token, object.colon_token - 1),
+                buffer,
+            );
+            self.format_token_id(object.colon_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                self.format_mode(&object.mode, buffer);
+            });
+        });
     }
 
     pub fn format_mode(&self, mode: &ModeIndication, buffer: &mut Buffer) {
