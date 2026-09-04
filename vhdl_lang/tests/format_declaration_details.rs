@@ -205,7 +205,7 @@ fn comments_blank_lines_and_positional_items_separate_runs() {
     );
     assert!(
         output.contains(
-            "a : bit;\n        longer : bit; -- separator\n        b  : bit;\n        cc : bit"
+            "a      : bit;\n        longer : bit; -- separator\n        b      : bit;\n        cc     : bit"
         ),
         "{output}"
     );
@@ -273,6 +273,7 @@ fn comment_anchors_and_nested_layouts_are_stable_across_settings() {
                                 keyword_case,
                                 align_declarations,
                                 align_associations,
+                                align_assignments: false,
                             },
                         );
                     }

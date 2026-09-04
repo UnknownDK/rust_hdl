@@ -8,7 +8,8 @@
 use crate::ast::{ContextClause, ContextDeclaration, ContextItem};
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
-use crate::{HasTokenSpan, TokenSpan};
+use crate::syntax::Value;
+use crate::{HasTokenSpan, TokenAccess, TokenSpan};
 use vhdl_lang::indented;
 
 impl VHDLFormatter<'_> {
@@ -33,6 +34,15 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_context_clause(&self, clause: &ContextClause, buffer: &mut Buffer) {
+        self.format_context_clause_with_grouping(clause, false, buffer);
+    }
+
+    fn format_context_clause_with_grouping(
+        &self,
+        clause: &ContextClause,
+        grouped: bool,
+        buffer: &mut Buffer,
+    ) {
         for (i, item) in clause.iter().enumerate() {
             match item {
                 ContextItem::Use(use_clause) => self.format_use_clause(use_clause, buffer),
@@ -43,16 +53,43 @@ impl VHDLFormatter<'_> {
                     self.format_context_reference(context_reference, buffer)
                 }
             }
-            if i < clause.len() - 1 {
-                self.line_break_preserve_whitespace(item.span().end_token, buffer);
+            if let Some(next) = clause.get(i + 1) {
+                let blank = grouped
+                    && (matches!(item, ContextItem::Library(_))
+                        && !matches!(next, ContextItem::Library(_))
+                        || matches!((item, next), (ContextItem::Use(_), ContextItem::Use(_)))
+                            && self.context_use_root(item) != self.context_use_root(next));
+                if blank {
+                    buffer.blank_line();
+                } else {
+                    self.line_break_preserve_whitespace(item.span().end_token, buffer);
+                }
             }
         }
+    }
+
+    fn context_use_root(&self, item: &ContextItem) -> Option<String> {
+        let ContextItem::Use(use_clause) = item else {
+            return None;
+        };
+        let mut names = use_clause.name_list.iter();
+        let root = match &self.tokens.index(names.next()?.span.start_token).value {
+            Value::Identifier(symbol) => symbol.name_utf8(),
+            _ => return None,
+        };
+        for name in names {
+            match &self.tokens.index(name.span.start_token).value {
+                Value::Identifier(symbol) if symbol.name_utf8() == root => {}
+                _ => return None,
+            }
+        }
+        Some(root)
     }
 
     /// Context items remain a group, separated from the following design unit.
     /// Context declarations use `format_context_clause` directly for their body.
     pub(crate) fn format_design_context(&self, clause: &ContextClause, buffer: &mut Buffer) {
-        self.format_context_clause(clause, buffer);
+        self.format_context_clause_with_grouping(clause, true, buffer);
         if !clause.is_empty() {
             buffer.blank_line();
         }

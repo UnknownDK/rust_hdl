@@ -31,12 +31,37 @@ impl VHDLFormatter<'_> {
         }
         indented!(buffer, {
             buffer.line_break();
-            for (i, item) in statements.iter().enumerate() {
-                self.format_labeled_sequential_statement(item, buffer);
-                if i < statements.len() - 1 {
-                    self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
-                }
-            }
+            let align = buffer.config().align_assignments;
+            self.format_aligned_items_with_trailing_comments(
+                statements,
+                buffer,
+                false,
+                |item| {
+                    if !align || item.label.tree.is_some() {
+                        return None;
+                    }
+                    match &item.statement.item {
+                        SequentialStatement::VariableAssignment(assignment)
+                            if !matches!(assignment.rhs, AssignmentRightHand::Selected(_)) =>
+                        {
+                            Some(assignment.target.span.end_token + 1)
+                        }
+                        SequentialStatement::SignalAssignment(assignment)
+                            if !matches!(assignment.rhs, AssignmentRightHand::Selected(_)) =>
+                        {
+                            Some(assignment.target.span.end_token + 1)
+                        }
+                        _ => None,
+                    }
+                },
+                |item| item.statement.span,
+                |i, item, buffer| {
+                    self.format_labeled_sequential_statement(item, buffer);
+                    if i < statements.len() - 1 {
+                        self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+                    }
+                },
+            );
         });
     }
 

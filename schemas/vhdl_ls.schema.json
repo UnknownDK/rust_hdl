@@ -13,8 +13,9 @@
         "max_width": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 100 },
         "indent_width": { "type": "integer", "minimum": 0, "maximum": 32, "default": 4 },
         "keyword_case": { "type": "string", "enum": ["lower", "upper"], "default": "lower" },
-        "align_declarations": { "type": "boolean", "default": false },
+        "align_declarations": { "type": "boolean", "default": false, "description": "Align columns in adjacent object/interface declarations and record fields." },
         "align_associations": { "type": "boolean", "default": false, "description": "Align arrows in expanded named maps and aggregates." },
+        "align_assignments": { "type": "boolean", "default": false, "description": "Align operators in adjacent simple signal and variable assignments." },
         "inline_argument_limit": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 2, "description": "Maximum items kept inline when they fit in calls, interfaces, maps and aggregates containing named associations. Purely positional aggregates remain width-driven." }
       }
     },

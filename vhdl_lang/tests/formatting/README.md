@@ -92,10 +92,13 @@ Original spaces within comment text and disabled regions remain untouched.
 
 ## Selective alignment
 
-`align_declarations` and `align_associations` are opt-in. The former aligns
-colons in object/file declarations, interfaces and record fields; the latter
-aligns named port/generic map and aggregate arrows. It does not align modes,
-types, default expressions, assignments or ordinary calls.
+`align_declarations`, `align_associations` and `align_assignments` are opt-in.
+The first aligns multiple available declaration columns: colons, explicit
+interface mode/type boundaries and default-assignment operators. It also aligns
+the available colon column in file declarations and record fields. The second
+aligns named port/generic map and aggregate arrows. The third aligns `<=` and
+`:=` in adjacent simple concurrent or sequential assignments. Ordinary calls
+are never aligned.
 Inline lists do not receive alignment padding. Interfaces and maps align when
 expanded by width, comments, preserved blank lines or the argument limit. Named
 aggregates retain their argument-limit-based alignment policy.
@@ -109,27 +112,35 @@ Ordinary newlines between items do not force expansion; actual blank lines are
 preserved as alignment boundaries. Separator comments are included when deciding
 whether a row can participate.
 
-Rows carry an `Align` document primitive, not literal spaces in token text.
-Adjacent single-line rows are measured using document width summaries. The
-widest prefix and suffix determine whether the complete run fits. If not, the
-run keeps ordinary spacing. Wrapped rows are excluded and split runs, so a long
-declaration cannot force neighboring declarations to wrap. Blank lines,
-standalone comments, positional associations and other declaration kinds are
-also boundaries. A standalone leading comment starts a new group with its
-following declaration; rows with internal or trailing comments are excluded.
-Padding is lazy and summaries are refreshed before enclosing groups are built.
-Aggregate comma comments participate in boundary detection; nested multiline
-values split alignment runs while small nested aggregates can stay inline.
+Rows carry one or more `Align` document primitives, not literal spaces in token
+text. Adjacent single-line rows are measured using document width summaries.
+Each column is widened independently. A row that cannot fit splits the run, so a
+long declaration does not prevent compatible rows on either side from aligning.
+Blank lines, standalone comments, positional associations and other item kinds
+are boundaries. A standalone leading comment starts a new group with its
+following row; trailing comments can participate, while internal comments and
+multiline content split the run. Padding is lazy and summaries are refreshed
+before enclosing groups are built. Aggregate comma comments participate in
+boundary detection; nested multiline values split association runs while small
+nested aggregates can stay inline.
+
+Assignment groups are scoped to one immediate statement list. Labels, selected
+assignments, force/release assignments and non-assignment statements break a
+run; nested branches and processes build independent groups. Signal `<=` and
+variable `:=` share a column when they occur in the same sequential run.
 
 ## Structural spacing
 
-Context clauses are separated from their design unit by one blank line; context
-declaration bodies retain ordinary spacing. A process is separated from each
-neighboring concurrent statement, and a subprogram body from each neighboring
-declaration, by one blank line. No extra blank line is added at list edges.
-Existing declaration groups are preserved, multiple empty lines collapse to one,
-and separation is inserted before leading documentation comments. Disabled
-regions and comment contents retain their preservation guarantees.
+Context clauses are separated from their design unit by one blank line. Library
+clauses are separated from following use clauses, and adjacent use clauses with
+different leading library names form separate visual groups without being
+reordered. Context declaration bodies retain ordinary spacing. A process is
+separated from each neighboring concurrent statement, and a subprogram body
+from each neighboring declaration, by one blank line. No extra blank line is
+added at list edges. Existing declaration groups are preserved, multiple empty
+lines collapse to one, and separation is inserted before leading documentation
+comments. Disabled regions and comment contents retain their preservation
+guarantees.
 
 `readability.input.vhd` and `readability.expected.vhd` illustrate these rules at
 width 60 with association alignment enabled. `format_readability.rs` checks
@@ -185,9 +196,10 @@ the parser version, overridden by `--standard`.
 
 `--format-config` explicitly selects a file; `--no-format-config` skips discovery.
 `inline_argument_limit` and `--inline-argument-limit` accept 0–10000.
-Use `--align-declarations=false` or `--align-associations=false` to override a
-project's enabled alignment. Invalid configuration fails with exit code 2 and
-no stdout. `[format]` rejects unknown keys. The formatter loader does not require
+Use `--align-declarations=false`, `--align-associations=false` or
+`--align-assignments=false` to override a project's enabled alignment. Invalid
+configuration fails with exit code 2 and no stdout. `[format]` rejects unknown
+keys. The formatter loader does not require
 `[libraries]`; a shared language-server configuration still requires that section.
 Library APIs do not implicitly read the filesystem; `FormatConfig::from_toml`
 loads the formatter section explicitly.

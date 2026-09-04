@@ -15,37 +15,75 @@ impl VHDLFormatter<'_> {
         when_broken: bool,
         target: impl Fn(&T) -> Option<TokenId>,
         span: impl Fn(&T) -> TokenSpan,
+        build: impl FnMut(usize, &T, &mut Buffer),
+    ) {
+        self.format_aligned_items_multi(
+            items,
+            buffer,
+            (when_broken, false),
+            |item| target(item).map_or_else(Vec::new, |token| vec![(token, 1)]),
+            span,
+            build,
+        );
+    }
+
+    pub(crate) fn format_aligned_items_with_trailing_comments<T>(
+        &self,
+        items: &[T],
+        buffer: &mut Buffer,
+        when_broken: bool,
+        target: impl Fn(&T) -> Option<TokenId>,
+        span: impl Fn(&T) -> TokenSpan,
+        build: impl FnMut(usize, &T, &mut Buffer),
+    ) {
+        self.format_aligned_items_multi(
+            items,
+            buffer,
+            (when_broken, true),
+            |item| target(item).map_or_else(Vec::new, |token| vec![(token, 1)]),
+            span,
+            build,
+        );
+    }
+
+    pub(crate) fn format_aligned_items_multi<T>(
+        &self,
+        items: &[T],
+        buffer: &mut Buffer,
+        settings: (bool, bool),
+        targets: impl Fn(&T) -> Vec<(TokenId, usize)>,
+        span: impl Fn(&T) -> TokenSpan,
         mut build: impl FnMut(usize, &T, &mut Buffer),
     ) {
+        let (when_broken, allow_trailing_comments) = settings;
         let mut rows = Vec::new();
         let mut previous_end = None;
         for (i, item) in items.iter().enumerate() {
             let span = span(item);
-            let target = target(item);
+            let targets = targets(item);
             let start = self.tokens.index(span.start_token).full_range().start.line;
             let mut interior_comments = false;
-            let comments = target.is_some()
-                && span.iter().fold(false, |found, id| {
-                    let comments =
-                        self.tokens
-                            .index(id)
-                            .comments
-                            .as_ref()
-                            .is_some_and(|comments| {
-                                interior_comments |= comments.trailing.is_some()
-                                    || (id != span.start_token && !comments.leading.is_empty());
-                                !comments.leading.is_empty() || comments.trailing.is_some()
-                            });
-                    found || comments
-                });
-            let boundary =
-                target.is_none() || comments || previous_end.is_some_and(|end| start > end + 1);
+            let mut leading_comment = false;
+            if !targets.is_empty() {
+                for id in span.iter() {
+                    if let Some(comments) = &self.tokens.index(id).comments {
+                        leading_comment |= id == span.start_token && !comments.leading.is_empty();
+                        interior_comments |= ((id != span.end_token || !allow_trailing_comments)
+                            && comments.trailing.is_some())
+                            || (id != span.start_token && !comments.leading.is_empty());
+                    }
+                }
+            }
+            let boundary = targets.is_empty()
+                || interior_comments
+                || leading_comment
+                || previous_end.is_some_and(|end| start > end + 1);
             if boundary {
                 buffer.align_rows(&rows, when_broken);
                 rows.clear();
             }
-            if let Some(target) = target {
-                let index = buffer.alignment_row(target, |buffer| build(i, item, buffer));
+            if !targets.is_empty() {
+                let index = buffer.alignment_row_targets(&targets, |buffer| build(i, item, buffer));
                 if !interior_comments {
                     rows.push(index);
                 }

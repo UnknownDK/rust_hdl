@@ -1,4 +1,5 @@
 library ieee;
+
 use ieee.std_logic_1164.all;
 
 entity pipeline_stage is
@@ -7,8 +8,8 @@ entity pipeline_stage is
         clk     : in std_logic;
         reset_n : in std_logic;
 
-        valid_in  : in std_logic;
-        data_in   : in std_logic_vector(DATA_WIDTH - 1 downto 0);
+        valid_in  : in  std_logic;
+        data_in   : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
         valid_out : out std_logic;
         data_out  : out std_logic_vector(DATA_WIDTH - 1 downto 0)
     );

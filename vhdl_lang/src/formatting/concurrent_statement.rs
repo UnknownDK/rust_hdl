@@ -42,18 +42,43 @@ impl VHDLFormatter<'_> {
             return;
         }
         buffer.line_break();
-        for (i, item) in statements.iter().enumerate() {
-            self.format_labeled_concurrent_statement(item, buffer);
-            if let Some(next) = statements.get(i + 1) {
-                if matches!(item.statement.item, ConcurrentStatement::Process(_))
-                    || matches!(next.statement.item, ConcurrentStatement::Process(_))
-                {
-                    buffer.blank_line();
-                } else {
-                    self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+        let align = buffer.config().align_assignments;
+        self.format_aligned_items_with_trailing_comments(
+            statements,
+            buffer,
+            false,
+            |item| {
+                if !align || item.label.tree.is_some() {
+                    return None;
                 }
-            }
-        }
+                match &item.statement.item {
+                    ConcurrentStatement::Assignment(assignment)
+                        if !assignment.postponed
+                            && !assignment.guarded
+                            && !matches!(
+                                assignment.assignment.rhs,
+                                AssignmentRightHand::Selected(_)
+                            ) =>
+                    {
+                        Some(assignment.assignment.target.span.end_token + 1)
+                    }
+                    _ => None,
+                }
+            },
+            |item| item.statement.span,
+            |i, item, buffer| {
+                self.format_labeled_concurrent_statement(item, buffer);
+                if let Some(next) = statements.get(i + 1) {
+                    if matches!(item.statement.item, ConcurrentStatement::Process(_))
+                        || matches!(next.statement.item, ConcurrentStatement::Process(_))
+                    {
+                        buffer.blank_line();
+                    } else {
+                        self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+                    }
+                }
+            },
+        );
     }
 
     pub fn format_optional_label(&self, label: Option<&Ident>, buffer: &mut Buffer) {
