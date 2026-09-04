@@ -48,12 +48,11 @@ impl VHDLFormatter<'_> {
                     } else {
                         buffer.line_break();
                     }
-                    // Column alignment applies to structural multiline rows,
-                    // never padding multiple items sharing a physical line.
-                    let align = multiline && buffer.config().align_declarations;
+                    let align = buffer.config().align_declarations;
                     self.format_aligned_items(
                         &clause.items,
                         buffer,
+                        !multiline,
                         |item| {
                             if align {
                                 match item {
@@ -67,18 +66,33 @@ impl VHDLFormatter<'_> {
                                 None
                             }
                         },
-                        |item| item.span(),
+                        |item| {
+                            let mut span = item.span();
+                            if self
+                                .tokens
+                                .get_token(span.end_token + 1)
+                                .is_some_and(|token| token.kind == Kind::SemiColon)
+                            {
+                                span.end_token += 1;
+                            }
+                            span
+                        },
                         |i, item, buffer| {
                             self.format_interface_declaration(item, buffer);
                             if i < clause.items.len() - 1 {
                                 self.format_token_id(item.get_end_token() + 1, buffer);
-                                if align {
+                                if align && multiline {
                                     self.line_break_preserve_whitespace(
                                         item.get_end_token() + 1,
                                         buffer,
                                     );
                                 } else if multiline {
                                     buffer.line_break();
+                                } else if align {
+                                    self.soft_line_preserve_blank_line(
+                                        item.get_end_token() + 1,
+                                        buffer,
+                                    );
                                 } else {
                                     buffer.soft_line();
                                 }
@@ -118,10 +132,11 @@ impl VHDLFormatter<'_> {
                     } else {
                         buffer.soft_break(false);
                     }
-                    let align = multiline && buffer.config().align_associations;
+                    let align = buffer.config().align_associations;
                     self.format_aligned_items(
                         &list.items,
                         buffer,
+                        !multiline,
                         |item| {
                             if align {
                                 item.formal.as_ref().map(|formal| formal.span.end_token + 1)
@@ -136,7 +151,15 @@ impl VHDLFormatter<'_> {
                                     .map_or(item.actual.span.start_token, |formal| {
                                         formal.span.start_token
                                     }),
-                                item.actual.span.end_token,
+                                if self
+                                    .tokens
+                                    .get_token(item.actual.span.end_token + 1)
+                                    .is_some_and(|token| token.kind == Kind::Comma)
+                                {
+                                    item.actual.span.end_token + 1
+                                } else {
+                                    item.actual.span.end_token
+                                },
                             )
                         },
                         |i, item, buffer| {
@@ -145,10 +168,12 @@ impl VHDLFormatter<'_> {
                                 self.format_token_id(*token, buffer);
                             }
                             if i + 1 < list.items.len() {
-                                if align {
+                                if align && multiline {
                                     self.line_break_preserve_whitespace(list.tokens[i], buffer);
                                 } else if multiline {
                                     buffer.line_break();
+                                } else if align {
+                                    self.soft_line_preserve_blank_line(list.tokens[i], buffer);
                                 } else {
                                     buffer.soft_line();
                                 }

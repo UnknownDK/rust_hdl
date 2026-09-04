@@ -23,20 +23,25 @@ impl Prefix {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Doc {
     kind: Kind,
     flat: Prefix,
     broken: Prefix,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Kind {
     Text(String, Option<usize>),
     HardLine,
     Space,
     /// Lazy inter-token padding, resolved while composing an alignment run.
     Align(usize),
+    /// Select a row's padding using the enclosing delimiter group's mode.
+    IfBreak {
+        flat: Box<Doc>,
+        broken: Box<Doc>,
+    },
     SoftLine(bool),
     /// Prefer moving the following complete group before breaking inside it.
     PreferredLine,
@@ -149,6 +154,28 @@ impl Doc {
             }
         }
         changed
+    }
+
+    pub(crate) fn pad_alignment_when_broken(&mut self, extra: usize) {
+        if extra == 0 {
+            return;
+        }
+        // Only rows that actually need padding have two representations.
+        // Neither branch is rendered while constructing the document.
+        let mut padded = self.clone();
+        if padded.pad_alignment(extra) {
+            let unpadded = std::mem::replace(self, Self::concat([]));
+            let flat = unpadded.flat;
+            let broken = padded.broken;
+            *self = Self::leaf(
+                Kind::IfBreak {
+                    flat: Box::new(unpadded),
+                    broken: Box::new(padded),
+                },
+                flat,
+                broken,
+            );
+        }
     }
 
     /// A line break that flattens to a space (`space = true`) or nothing.
@@ -294,6 +321,14 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
             }
             Kind::Space => space = space.max(usize::from(column != 0)),
             Kind::Align(width) => space = space.max(if column == 0 { 0 } else { *width }),
+            Kind::IfBreak { flat, broken } => {
+                let branch = if matches!(mode, Mode::Flat) {
+                    flat
+                } else {
+                    broken
+                };
+                stack.push((branch, indent, mode, adjustment));
+            }
             Kind::SoftLine(true) | Kind::PreferredLine if matches!(mode, Mode::Flat) => {
                 space = space.max(usize::from(column != 0))
             }
@@ -434,6 +469,32 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_row_padding_does_not_force_a_list_to_wrap() {
+        let mut row = Doc::concat([
+            Doc::text("a"),
+            Doc::align(),
+            Doc::text("=> x,"),
+            Doc::soft_line(true),
+        ]);
+        row.pad_alignment_when_broken(5);
+        let list = Doc::group(Doc::concat([
+            Doc::text("("),
+            Doc::indent(
+                1,
+                Doc::concat([Doc::soft_line(false), row, Doc::text("longer => y")]),
+            ),
+            Doc::soft_line(false),
+            Doc::text(")"),
+        ]));
+        let flat = "(a => x, longer => y)";
+        assert_eq!(render(&list, 4, flat.len()), flat);
+        assert_eq!(
+            render(&list, 4, flat.len() - 1),
+            "(\n    a      => x,\n    longer => y\n)"
+        );
+    }
 
     fn call() -> Doc {
         Doc::group(Doc::concat([

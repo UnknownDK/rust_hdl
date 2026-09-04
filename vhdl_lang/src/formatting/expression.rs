@@ -110,6 +110,7 @@ impl VHDLFormatter<'_> {
         self.format_aligned_items(
             associations,
             buffer,
+            false,
             |association| match &association.item {
                 ElementAssociation::Named(_, expression) if align => {
                     Some(expression.span.start_token - 1)
