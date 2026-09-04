@@ -7,9 +7,9 @@
 
 use crate::ast::token_range::WithTokenSpan;
 use crate::ast::{
-    CaseStatement, Choice, DelayMechanism, Expression, Ident, IterationScheme,
+    AssignmentRightHand, CaseStatement, Choice, DelayMechanism, Expression, Ident, IterationScheme,
     LabeledSequentialStatement, LoopStatement, ReportStatement, SequentialStatement,
-    SignalAssignment, WaitStatement, WithRef,
+    SignalAssignment, WaitStatement, Waveform, WithRef,
 };
 use crate::formatting::buffer::Buffer;
 use crate::{HasTokenSpan, TokenSpan};
@@ -204,6 +204,22 @@ impl VHDLFormatter<'_> {
             buffer.push_whitespace();
             self.format_token_id(assignment.target.span.end_token + 1, buffer);
             buffer.with_indent(|buffer| {
+                if let AssignmentRightHand::Simple(Waveform::Elements(elements)) = &assignment.rhs {
+                    if elements.len() > 1 || elements.iter().any(|element| element.after.is_some())
+                    {
+                        // A timed or multi-element waveform expands as one list,
+                        // including the break after the assignment operator.
+                        buffer.group(|buffer| {
+                            buffer.soft_line();
+                            if let Some(delay_mechanism) = &assignment.delay_mechanism {
+                                self.format_delay_mechanism(delay_mechanism, buffer);
+                                buffer.soft_line();
+                            }
+                            self.format_waveform_elements(elements, buffer);
+                        });
+                        return;
+                    }
+                }
                 buffer.soft_line();
                 if let Some(delay_mechanism) = &assignment.delay_mechanism {
                     self.format_delay_mechanism(delay_mechanism, buffer);

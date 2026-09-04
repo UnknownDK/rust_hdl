@@ -139,6 +139,26 @@ prefers moving its complete mode/type to the next line before splitting the
 type's range; internal wrapping remains available if the type cannot fit there
 either. Keyword-prefixed declarations retain their continuation indentation.
 
+Enumeration literals and array dimensions use width-aware lists: short lists
+stay inline, while expanded lists put each item on its own line. These lists do
+not use `inline_argument_limit`. Array declarations keep `) of <type>` together
+when possible, moving the complete element type below `of` before splitting its
+constraint.
+
+Simple timed or multi-element signal assignments stay inline when they fit.
+When expanded, their waveform starts below the assignment operator with one
+element per line. Each value stays beside its `after` delay when possible;
+otherwise the timing clause uses a further-indented continuation:
+
+```vhdl
+output_signal <=
+    first_long_value after first_long_delay,
+    second_long_value after second_long_delay;
+output_signal <=
+    calculate_output(input_data, settings)
+        after PROPAGATION_DELAY;
+```
+
 Expanded selected assignments separate the selector from the indented target,
 keeping the first value beside that target when it fits:
 

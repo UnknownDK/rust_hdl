@@ -257,33 +257,7 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_assignment_layout(
-            &assignment_statement.assignment.rhs,
-            span,
-            buffer,
-            |buffer| {
-                self.format_target(&assignment_statement.assignment.target, buffer);
-                buffer.push_whitespace();
-                // <=
-                self.format_token_id(
-                    assignment_statement.assignment.target.span.end_token + 1,
-                    buffer,
-                );
-                buffer.with_indent(|buffer| {
-                    buffer.soft_line();
-                    if let Some(mechanism) = &assignment_statement.assignment.delay_mechanism {
-                        self.format_delay_mechanism(mechanism, buffer);
-                        buffer.soft_line();
-                    }
-                    self.format_assignment_right_hand(
-                        &assignment_statement.assignment.rhs,
-                        Self::format_waveform,
-                        buffer,
-                    );
-                });
-                self.format_token_id(span.end_token, buffer);
-            },
-        );
+        self.format_signal_assignment(&assignment_statement.assignment, span, buffer);
     }
 
     /// A selected assignment's header and body flatten together. Once expanded,
@@ -406,27 +380,37 @@ impl VHDLFormatter<'_> {
 
     pub fn format_waveform(&self, waveform: &Waveform, buffer: &mut Buffer) {
         buffer.group(|buffer| match waveform {
-            Waveform::Elements(elements) => {
-                for (i, element) in elements.iter().enumerate() {
-                    self.format_waveform_element(element, buffer);
-                    if i < elements.len() - 1 {
-                        self.format_token_id(element.get_end_token() + 1, buffer);
-                        buffer.soft_line();
-                    }
-                }
-            }
+            Waveform::Elements(elements) => self.format_waveform_elements(elements, buffer),
             Waveform::Unaffected(token) => self.format_token_id(*token, buffer),
         });
+    }
+
+    /// Separators inherit the enclosing layout so a simple assignment can
+    /// break before its first element and between all elements together.
+    pub(crate) fn format_waveform_elements(
+        &self,
+        elements: &[WaveformElement],
+        buffer: &mut Buffer,
+    ) {
+        for (i, element) in elements.iter().enumerate() {
+            self.format_waveform_element(element, buffer);
+            if i + 1 < elements.len() {
+                self.format_token_id(element.get_end_token() + 1, buffer);
+                buffer.soft_line();
+            }
+        }
     }
 
     pub fn format_waveform_element(&self, element: &WaveformElement, buffer: &mut Buffer) {
         buffer.group(|buffer| {
             self.format_expression(element.value.as_ref(), buffer);
             if let Some(after) = &element.after {
-                buffer.soft_line();
-                self.format_token_id(after.get_start_token() - 1, buffer);
-                buffer.soft_line();
-                self.format_expression(after.as_ref(), buffer);
+                buffer.with_indent(|buffer| {
+                    buffer.soft_line();
+                    self.format_token_id(after.get_start_token() - 1, buffer);
+                    buffer.push_whitespace();
+                    self.format_expression(after.as_ref(), buffer);
+                });
             }
         });
     }
