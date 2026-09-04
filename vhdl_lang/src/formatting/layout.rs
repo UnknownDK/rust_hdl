@@ -38,6 +38,8 @@ enum Kind {
     /// Lazy inter-token padding, resolved while composing an alignment run.
     Align(usize),
     SoftLine(bool),
+    /// Prefer moving the following complete group before breaking inside it.
+    PreferredLine,
     Indent(usize, Box<Doc>),
     Group {
         children: Vec<Doc>,
@@ -154,6 +156,14 @@ impl Doc {
         Self::leaf(
             Kind::SoftLine(space),
             Prefix::new(usize::from(space), false),
+            Prefix::new(0, true),
+        )
+    }
+
+    pub(crate) fn preferred_line() -> Self {
+        Self::leaf(
+            Kind::PreferredLine,
+            Prefix::new(1, false),
             Prefix::new(0, true),
         )
     }
@@ -284,17 +294,40 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
             }
             Kind::Space => space = space.max(usize::from(column != 0)),
             Kind::Align(width) => space = space.max(if column == 0 { 0 } else { *width }),
-            Kind::SoftLine(true) if matches!(mode, Mode::Flat) => {
+            Kind::SoftLine(true) | Kind::PreferredLine if matches!(mode, Mode::Flat) => {
                 space = space.max(usize::from(column != 0))
             }
             Kind::SoftLine(false) if matches!(mode, Mode::Flat) => {}
-            Kind::SoftLine(flat_space) if matches!(mode, Mode::Fill) => {
-                let mut width = column.saturating_add(usize::from(*flat_space));
+            Kind::SoftLine(_) | Kind::PreferredLine if matches!(mode, Mode::Fill) => {
+                let flat_space = !matches!(doc.kind, Kind::SoftLine(false));
+                let prefer_group = matches!(doc.kind, Kind::PreferredLine);
+                let mut width = column.saturating_add(usize::from(flat_space));
                 let mut fits = width <= max_width;
-                for (next, _, next_mode, _) in stack.iter().rev() {
-                    let prefix = match next_mode {
-                        Mode::Flat => next.flat,
-                        Mode::Break | Mode::Fill => next.broken,
+                for (index, (next, next_indent, next_mode, next_adjustment)) in
+                    stack.iter().rev().enumerate()
+                {
+                    let level = match &next.kind {
+                        Kind::Group {
+                            indent: Some(level),
+                            ..
+                        }
+                        | Kind::Indent(level, _) => level.saturating_add_signed(*next_adjustment),
+                        _ => *next_indent,
+                    };
+                    let prefer_flat = prefer_group
+                        && index == 0
+                        && !next.flat.ends_line()
+                        && level
+                            .saturating_mul(indent_width)
+                            .saturating_add(next.flat.width())
+                            <= max_width;
+                    let prefix = if prefer_flat {
+                        next.flat
+                    } else {
+                        match next_mode {
+                            Mode::Flat => next.flat,
+                            Mode::Break | Mode::Fill => next.broken,
+                        }
                     };
                     width = width.saturating_add(prefix.width());
                     if width > max_width {
@@ -306,14 +339,14 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                     }
                 }
                 if fits {
-                    space = space.max(usize::from(*flat_space && column != 0));
+                    space = space.max(usize::from(flat_space && column != 0));
                 } else {
                     output.push('\n');
                     column = 0;
                     space = 0;
                 }
             }
-            Kind::HardLine | Kind::SoftLine(_) => {
+            Kind::HardLine | Kind::SoftLine(_) | Kind::PreferredLine => {
                 output.push('\n');
                 column = 0;
                 space = 0;
@@ -417,6 +450,39 @@ mod tests {
             Doc::soft_line(false),
             Doc::text(")"),
         ]))
+    }
+
+    #[test]
+    fn preferred_break_moves_a_complete_type_before_breaking_its_range() {
+        let typ = Doc::indent(
+            1,
+            Doc::group(Doc::concat([
+                Doc::text("vector("),
+                Doc::indent(
+                    2,
+                    Doc::concat([
+                        Doc::soft_line(false),
+                        Doc::text("a,"),
+                        Doc::soft_line(true),
+                        Doc::text("b"),
+                    ]),
+                ),
+                Doc::soft_line(false),
+                Doc::text(")"),
+            ])),
+        );
+        let doc = Doc::fill_group(Doc::concat([
+            Doc::text("long:"),
+            Doc::preferred_line(),
+            typ,
+            Doc::text(";"),
+        ]));
+        assert_eq!(render(&doc, 4, 30), "long: vector(a, b);");
+        assert_eq!(render(&doc, 4, 18), "long:\n    vector(a, b);");
+        assert_eq!(
+            render(&doc, 4, 12),
+            "long:\n    vector(\n        a,\n        b\n    );"
+        );
     }
 
     #[test]

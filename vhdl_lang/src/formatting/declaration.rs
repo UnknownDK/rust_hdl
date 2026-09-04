@@ -143,7 +143,7 @@ impl VHDLFormatter<'_> {
             self.format_ident_list(&object_decl.idents, buffer);
             self.format_token_id(object_decl.colon_token, buffer);
             buffer.with_indent(|buffer| {
-                buffer.soft_line();
+                buffer.preferred_line();
                 self.format_subtype_indication(&object_decl.subtype_indication, buffer);
                 self.format_default_expression(object_decl.expression.as_ref(), buffer);
             });
@@ -163,7 +163,7 @@ impl VHDLFormatter<'_> {
             self.format_ident_list(&file_decl.idents, buffer);
             self.format_token_id(file_decl.colon_token, buffer);
             buffer.with_indent(|buffer| {
-                buffer.soft_line();
+                buffer.preferred_line();
                 self.format_subtype_indication(&file_decl.subtype_indication, buffer);
                 if let Some((token, open_information)) = &file_decl.open_info {
                     buffer.soft_line();
@@ -412,13 +412,17 @@ impl VHDLFormatter<'_> {
         declaration: &ElementDeclaration,
         buffer: &mut Buffer,
     ) {
-        self.format_ident_list(&declaration.idents, buffer);
-        // :
-        self.format_token_id(declaration.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(&declaration.subtype, buffer);
-        // ;
-        self.format_token_id(declaration.span.end_token, buffer);
+        buffer.fill_group(|buffer| {
+            self.format_declaration_idents(&declaration.idents, buffer);
+            // :
+            self.format_token_id(declaration.colon_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.preferred_line();
+                self.format_subtype_indication(&declaration.subtype, buffer);
+            });
+            // ;
+            self.format_token_id(declaration.span.end_token, buffer);
+        });
     }
 
     pub fn format_protected_type_declaration(

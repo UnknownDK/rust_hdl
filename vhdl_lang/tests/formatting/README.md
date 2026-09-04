@@ -27,6 +27,25 @@ and wrapping a sum does not split products that fit. Concatenations also keep
 arithmetic operands in separate groups. Existing parentheses are retained.
 `if`/`elsif` headers group their condition with a break before `then`: expanded
 headers place `then` at the statement indentation; short headers remain inline.
+Loop and generate headers use the same grouped break before `loop`/`generate`.
+Labels remain attached to their header, and unconditional loops stay compact.
+
+Grouped interface and record names share one indentation level when wrapped;
+declarations with an explicit keyword keep continuation indentation after that
+keyword. A preferred break before a mode/type probes the following group's
+cached flat width. If the complete group fits on a continuation line, that break
+is preferred to splitting its range. Otherwise the existing internal breaks are
+used. Defaults remain separate groups, so a long default does not unnecessarily
+expand a short type. No child document is rendered during this decision.
+
+Selected assignments group `with ... select` and their body together. When the
+statement expands, its target starts on a new indented line; the first value
+stays beside the target when possible and later alternatives use continuation
+indentation. The shared layout handles concurrent signals and sequential
+variables, signals and force assignments, preserving matching selections and
+postponed prefixes. Choice lists share an operator-leading `|` layout between
+selected assignments, case statements and case generates, with independent
+wrapping of discrete ranges and expressions inside each choice.
 
 Function headers use local continuation decisions so an expanded parameter list
 does not force `return` onto a new line after `)`. The return type and `is` remain
@@ -77,6 +96,13 @@ regions and comment contents retain their preservation guarantees.
 width 60 with association alignment enabled. `format_readability.rs` checks
 exact layouts, language versions, comment and positional boundaries, nesting,
 width fallback and preservation/idempotency across 180 option combinations.
+
+`layout_consistency.input.vhd` and `layout_consistency.expected.vhd` show grouped
+names, complete types, block headers and selected assignments at width 60 with
+declaration alignment enabled. `format_layout_consistency.rs` checks the exact
+output, short and narrow layouts, selection modifiers and language versions,
+plus comment preservation/idempotency across 144 option combinations. Renderer
+unit tests cover the preferred break's flat, whole-type and internal-wrap cases.
 
 `alignment_rtl.input.vhd` and `alignment_rtl.expected.vhd` provide a reviewed,
 synthetic RTL style baseline with a state machine, payload registers, interface

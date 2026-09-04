@@ -222,15 +222,19 @@ impl VHDLFormatter<'_> {
         declaration: &InterfaceFileDeclaration,
         buffer: &mut Buffer,
     ) {
-        self.format_token_id(declaration.span.start_token, buffer);
-        buffer.push_whitespace();
-        self.format_ident_list(&declaration.idents, buffer);
-        if buffer.config().align_declarations {
+        buffer.fill_group(|buffer| {
+            self.format_token_id(declaration.span.start_token, buffer);
             buffer.push_whitespace();
-        }
-        self.format_token_id(declaration.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(&declaration.subtype_indication, buffer);
+            self.format_ident_list(&declaration.idents, buffer);
+            if buffer.config().align_declarations {
+                buffer.push_whitespace();
+            }
+            self.format_token_id(declaration.colon_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.preferred_line();
+                self.format_subtype_indication(&declaration.subtype_indication, buffer);
+            });
+        });
     }
 
     pub fn format_interface_subprogram_declaration(
@@ -302,14 +306,16 @@ impl VHDLFormatter<'_> {
                     buffer,
                 );
                 buffer.push_whitespace();
+                self.format_ident_list(&object.idents, buffer);
+            } else {
+                self.format_declaration_idents(&object.idents, buffer);
             }
-            self.format_ident_list(&object.idents, buffer);
             if buffer.config().align_declarations {
                 buffer.push_whitespace();
             }
             self.format_token_id(object.colon_token, buffer);
             buffer.with_indent(|buffer| {
-                buffer.soft_line();
+                buffer.preferred_line();
                 self.format_mode(&object.mode, buffer);
             });
         });
@@ -319,7 +325,7 @@ impl VHDLFormatter<'_> {
         use ModeIndication::*;
         match mode {
             Simple(simple) => self.format_simple_mode(simple, buffer),
-            View(mode) => self.format_mode_view_indication(mode, buffer),
+            View(mode) => buffer.group(|buffer| self.format_mode_view_indication(mode, buffer)),
         }
     }
 
@@ -377,11 +383,13 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_simple_mode(&self, mode: &SimpleModeIndication, buffer: &mut Buffer) {
-        if let Some(mode) = &mode.mode {
-            self.format_token_id(mode.token, buffer);
-            buffer.push_whitespace();
-        }
-        self.format_subtype_indication(&mode.subtype_indication, buffer);
+        buffer.group(|buffer| {
+            if let Some(mode) = &mode.mode {
+                self.format_token_id(mode.token, buffer);
+                buffer.push_whitespace();
+            }
+            self.format_subtype_indication(&mode.subtype_indication, buffer);
+        });
         self.format_default_expression(mode.expression.as_ref(), buffer);
     }
 }

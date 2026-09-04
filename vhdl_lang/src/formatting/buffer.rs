@@ -345,6 +345,17 @@ impl Buffer {
         self.soft_break(true);
     }
 
+    /// Prefer keeping the following mode/type group intact on a new line.
+    /// If it cannot fit there either, ordinary nested wrapping remains available.
+    pub(crate) fn preferred_line(&mut self) {
+        if self.insert_extra_newline || self.pending_line_breaks > 0 {
+            self.line_break();
+        } else {
+            self.push_doc(Doc::preferred_line());
+            self.last_whitespace = true;
+        }
+    }
+
     pub(crate) fn soft_break(&mut self, space: bool) {
         if self.insert_extra_newline || self.pending_line_breaks > 0 {
             self.line_break();
