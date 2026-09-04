@@ -35,9 +35,7 @@ impl VHDLFormatter<'_> {
                     });
                 });
             }
-            Aggregate(aggregate) => {
-                self.format_target_aggregate(aggregate, span, buffer);
-            }
+            Aggregate(aggregate) => self.format_expression_aggregate(aggregate, span, buffer),
             Qualified(qualified_expr) => self.format_qualified_expression(qualified_expr, buffer),
             Name(name) => self.format_name(WithTokenSpan::new(name, span), buffer),
             Literal(_) => self.format_token_span(span, buffer),
@@ -103,46 +101,95 @@ impl VHDLFormatter<'_> {
     pub fn format_element_associations(
         &self,
         associations: &[WithTokenSpan<ElementAssociation>],
+        pack_simple_positionals: bool,
         buffer: &mut Buffer,
     ) {
         let multiline = self.expand_named_aggregate(associations, buffer);
         let align = multiline && buffer.config().align_associations;
-        self.format_aligned_items(
-            associations,
-            buffer,
-            false,
-            |association| match &association.item {
-                ElementAssociation::Named(_, expression) if align => {
-                    Some(expression.span.start_token - 1)
-                }
-                _ => None,
-            },
-            |association| {
-                // A trailing comment normally belongs to the comma, not the
-                // expression. Include it when finding alignment boundaries.
-                let end = association.span.end_token;
-                let comma = self
-                    .tokens
-                    .get_token(end + 1)
-                    .is_some_and(|token| token.kind == crate::syntax::Kind::Comma);
-                TokenSpan::new(
-                    association.span.start_token,
-                    if comma { end + 1 } else { end },
-                )
-            },
-            |i, association, buffer| {
-                self.format_element_association(association, buffer);
-                if i + 1 < associations.len() {
-                    let comma = association.span.end_token + 1;
-                    self.format_token_id(comma, buffer);
-                    if multiline {
-                        self.line_break_preserve_whitespace(comma, buffer);
-                    } else {
-                        buffer.soft_line();
+        let packed = pack_simple_positionals
+            && associations.len() > 1
+            && associations.iter().all(|association| {
+                matches!(&association.item, ElementAssociation::Positional(expression)
+                    if Self::is_simple_aggregate_value(&expression.item))
+            });
+        let build = |buffer: &mut Buffer| {
+            self.format_aligned_items(
+                associations,
+                buffer,
+                false,
+                |association| match &association.item {
+                    ElementAssociation::Named(_, expression) if align => {
+                        Some(expression.span.start_token - 1)
                     }
-                }
-            },
-        );
+                    _ => None,
+                },
+                |association| {
+                    // A trailing comment normally belongs to the comma, not the
+                    // expression. Include it when finding alignment boundaries.
+                    let end = association.span.end_token;
+                    let comma = self
+                        .tokens
+                        .get_token(end + 1)
+                        .is_some_and(|token| token.kind == crate::syntax::Kind::Comma);
+                    TokenSpan::new(
+                        association.span.start_token,
+                        if comma { end + 1 } else { end },
+                    )
+                },
+                |i, association, buffer| {
+                    self.format_element_association(association, packed, buffer);
+                    if i + 1 < associations.len() {
+                        let comma = association.span.end_token + 1;
+                        self.format_token_id(comma, buffer);
+                        if multiline {
+                            self.line_break_preserve_whitespace(comma, buffer);
+                        } else if packed {
+                            // Keep a complete scalar on the current line or move
+                            // it intact to the next available line.
+                            buffer.preferred_line();
+                        } else {
+                            buffer.soft_line();
+                        }
+                    }
+                },
+            );
+        };
+        if packed {
+            buffer.fill_group(build);
+        } else {
+            build(buffer);
+        }
+    }
+
+    fn is_simple_aggregate_value(expression: &Expression) -> bool {
+        match expression {
+            Expression::Literal(_) => true,
+            Expression::Unary(_, expression) => Self::is_simple_aggregate_value(&expression.item),
+            Expression::Name(name) => Self::is_simple_aggregate_name(name),
+            Expression::Binary(..)
+            | Expression::Aggregate(_)
+            | Expression::Qualified(_)
+            | Expression::New(_)
+            | Expression::Parenthesized(_) => false,
+        }
+    }
+
+    fn is_simple_aggregate_name(name: &crate::ast::Name) -> bool {
+        use crate::ast::Name;
+        match name {
+            Name::Designator(_) => true,
+            Name::Selected(prefix, _) | Name::SelectedAll(prefix) => {
+                Self::is_simple_aggregate_name(&prefix.item)
+            }
+            Name::Attribute(attribute) => {
+                Self::is_simple_aggregate_name(&attribute.name.item)
+                    && attribute
+                        .expr
+                        .as_ref()
+                        .is_none_or(|expression| Self::is_simple_aggregate_value(&expression.item))
+            }
+            Name::Slice(..) | Name::CallOrIndexed(_) | Name::External(_) => false,
+        }
     }
 
     pub(crate) fn expand_named_aggregate(
@@ -159,11 +206,16 @@ impl VHDLFormatter<'_> {
     fn format_element_association(
         &self,
         association: &WithTokenSpan<ElementAssociation>,
+        packed: bool,
         buffer: &mut Buffer,
     ) {
         buffer.fill_group(|buffer| match &association.item {
             ElementAssociation::Positional(expression) => {
-                self.format_expression(expression.as_ref(), buffer)
+                if packed {
+                    self.format_simple_aggregate_value(expression.as_ref(), buffer);
+                } else {
+                    self.format_expression(expression.as_ref(), buffer);
+                }
             }
             ElementAssociation::Named(choices, expression) => {
                 buffer.group(|buffer| {
@@ -184,6 +236,25 @@ impl VHDLFormatter<'_> {
                 });
             }
         });
+    }
+
+    fn format_simple_aggregate_value(
+        &self,
+        expression: WithTokenSpan<&Expression>,
+        buffer: &mut Buffer,
+    ) {
+        if let Expression::Unary(operator, operand) = expression.item {
+            self.format_token_id(operator.token, buffer);
+            if !matches!(
+                operator.item.item,
+                Operator::Minus | Operator::Plus | Operator::QueQue
+            ) {
+                buffer.push_whitespace();
+            }
+            self.format_simple_aggregate_value(operand.as_ref().as_ref(), buffer);
+        } else {
+            self.format_expression(expression, buffer);
+        }
     }
 
     pub fn format_subtype_indication(&self, indication: &SubtypeIndication, buffer: &mut Buffer) {

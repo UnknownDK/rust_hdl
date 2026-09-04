@@ -13,9 +13,13 @@ parameters, generic/port maps, generic/port interfaces and aggregates containing
 named associations. Each aggregate association counts once, including positional
 entries in mixed aggregates. Grouped names in an interface declaration count
 individually without changing the grouping's tokens. Empty lists remain compact;
-zero forces all nonempty covered lists to expand. Slices, purely positional
-aggregates, sensitivity lists and ordinary parenthesized expressions keep their
-existing width-aware rules. Nested groups choose independently. Statement
+zero forces all nonempty covered lists to expand. Slices, sensitivity lists and
+ordinary parenthesized expressions keep their existing width-aware rules. Purely
+positional aggregates are also width-driven: all-scalar value lists use a fill
+layout that packs complete values greedily, while a named or complex value keeps
+the whole aggregate structural. Unary signs in packed values are atomic with
+their operands. Targets never use value packing. Nested groups choose
+independently. Statement
 continuation groups decide their spaces/breaks locally, so an assignment prefix can remain beside a call
 whose arguments wrap. Expressions inherit the indentation of the physical line
 where they start; their closing delimiters return to that level. Multi-item
@@ -131,6 +135,14 @@ regions and comment contents retain their preservation guarantees.
 width 60 with association alignment enabled. `format_readability.rs` checks
 exact layouts, language versions, comment and positional boundaries, nesting,
 width fallback and preservation/idempotency across 180 option combinations.
+
+`positional_aggregates.input.vhd` and `positional_aggregates.expected.vhd` show
+a packed numeric lookup table beside a structural complex aggregate at width 60
+and two-space indentation. `format_positional_aggregates.rs` checks exact output,
+width filling, atomic signs, scalar names, named/mixed/complex and nested values,
+qualified aggregates, structural targets, comment breaks, disabled regions and
+all language versions. It also checks comment preservation and idempotency across
+144 width/indent/argument-limit/casing/alignment combinations.
 
 `layout_consistency.input.vhd` and `layout_consistency.expected.vhd` show grouped
 names, complete types, block headers and selected assignments at width 60 with

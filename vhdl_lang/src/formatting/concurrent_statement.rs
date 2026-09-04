@@ -430,9 +430,27 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
+        self.format_aggregate(associations, span, false, buffer);
+    }
+
+    pub(crate) fn format_expression_aggregate(
+        &self,
+        associations: &[WithTokenSpan<ElementAssociation>],
+        span: TokenSpan,
+        buffer: &mut Buffer,
+    ) {
+        self.format_aggregate(associations, span, true, buffer);
+    }
+
+    fn format_aggregate(
+        &self,
+        associations: &[WithTokenSpan<ElementAssociation>],
+        span: TokenSpan,
+        pack_simple_positionals: bool,
+        buffer: &mut Buffer,
+    ) {
         let multiline = self.expand_named_aggregate(associations, buffer);
         buffer.expression_group(|buffer| {
-            // (
             self.format_token_id(span.start_token, buffer);
             buffer.with_indent(|buffer| {
                 if multiline {
@@ -440,14 +458,13 @@ impl VHDLFormatter<'_> {
                 } else {
                     buffer.soft_break(false);
                 }
-                self.format_element_associations(associations, buffer);
+                self.format_element_associations(associations, pack_simple_positionals, buffer);
             });
             if multiline {
                 buffer.line_break();
             } else {
                 buffer.soft_break(false);
             }
-            // )
             self.format_token_id(span.end_token, buffer);
         });
     }

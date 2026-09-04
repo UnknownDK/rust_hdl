@@ -81,9 +81,12 @@ ordinary parenthesized expressions are unaffected.
 
 Named aggregates use the same limit, counting each association once (including
 positional entries in a mixed aggregate). Purely positional aggregates remain
-width-driven. At the default limit, `(others => '0')` stays compact; `0` expands
-even single-association named aggregates. Nested aggregates choose their layouts
-independently.
+width-driven. Lists made entirely of simple scalar values pack as many complete
+values on each line as `max_width` allows, which keeps large lookup tables dense.
+A complex or named item gives the aggregate its structural one-item-per-line
+layout. Aggregate targets also remain structural. At the default limit,
+`(others => '0')` stays compact; `0` expands even single-association named
+aggregates. Nested aggregates choose their layouts independently.
 
 Expanded function headers keep `) return ... is` together when it fits.
 Assert `report` and `severity` clauses always start on their own indented lines,
