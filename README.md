@@ -113,6 +113,9 @@ separately aligned.
 Expressions prefer breaks between logical operands over breaks inside their
 comparisons, and between arithmetic terms over breaks inside their products.
 Expanded `if`/`elsif` headers put `then` on its own line; short headers stay inline.
+Expanded `while`/`for` loops and generate headers do the same with `loop` and
+`generate`. Long `case` and selected-assignment choice lists wrap before `|`,
+keeping each choice intact when possible.
 Operators lead continuation lines, with parentheses and token order preserved:
 
 ```vhdl
@@ -130,6 +133,25 @@ end if;
 
 The example assumes the condition needs wrapping and association alignment is
 enabled. Comparisons can still wrap if they cannot fit by themselves.
+
+Grouped interface names wrap at one indentation level. A long declaration
+prefers moving its complete mode/type to the next line before splitting the
+type's range; internal wrapping remains available if the type cannot fit there
+either. Keyword-prefixed declarations retain their continuation indentation.
+
+Expanded selected assignments separate the selector from the indented target,
+keeping the first value beside that target when it fits:
+
+```vhdl
+with selection_value select
+    result <= first_value when first_choice,
+        second_value when second_choice,
+        default_value when others;
+```
+
+Short selected assignments remain inline. The same rules apply to concurrent
+signal assignments and sequential signal, variable and force assignments.
+
 One blank line separates context clauses from their design unit, processes from
 neighboring concurrent statements, and subprogram bodies from neighboring
 declarations. Existing declaration groups are retained and extra blank lines

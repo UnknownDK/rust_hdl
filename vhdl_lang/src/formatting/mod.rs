@@ -80,16 +80,32 @@ impl<'b> VHDLFormatter<'b> {
 
 impl VHDLFormatter<'_> {
     pub fn format_ident_list<T: HasIdent>(&self, idents: &[T], buffer: &mut Buffer) {
+        self.format_ident_list_with_indent(idents, buffer, true);
+    }
+
+    pub(crate) fn format_declaration_idents<T: HasIdent>(&self, idents: &[T], buffer: &mut Buffer) {
+        self.format_ident_list_with_indent(idents, buffer, false);
+    }
+
+    fn format_ident_list_with_indent<T: HasIdent>(
+        &self,
+        idents: &[T],
+        buffer: &mut Buffer,
+        continuation: bool,
+    ) {
         buffer.expression_group(|buffer| {
             for (index, ident) in idents.iter().enumerate() {
                 let token = ident.ident().token;
                 if index == 0 {
                     self.format_token_id(token, buffer);
-                } else {
+                } else if continuation {
                     buffer.with_indent(|buffer| {
                         buffer.soft_line();
                         self.format_token_id(token, buffer);
                     });
+                } else {
+                    buffer.soft_line();
+                    self.format_token_id(token, buffer);
                 }
                 if self
                     .tokens
