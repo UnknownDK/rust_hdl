@@ -39,6 +39,7 @@ pub fn format_text_with_config(
 /// An error encountered while formatting or validating a VHDL source.
 #[derive(Debug)]
 pub enum FormatError {
+    InvalidConfig(String),
     DisabledRegionMismatch,
     InputDiagnostics(Vec<Diagnostic>),
     OutputDiagnostics(Vec<Diagnostic>),
@@ -63,6 +64,7 @@ pub enum FormatError {
 impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidConfig(message) => write!(f, "invalid formatter configuration: {message}"),
             Self::DisabledRegionMismatch => {
                 write!(f, "formatted output lost a disabled-region anchor")
             }
@@ -112,6 +114,7 @@ pub fn format_source_with_config(
     source: &Source,
     config: &FormatConfig,
 ) -> Result<String, FormatError> {
+    config.validate().map_err(FormatError::InvalidConfig)?;
     let source_text = {
         let contents = source.contents();
         (0..contents.num_lines())

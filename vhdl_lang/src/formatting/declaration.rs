@@ -31,12 +31,29 @@ impl VHDLFormatter<'_> {
             return;
         }
         buffer.line_break();
-        for (i, item) in declarations.iter().enumerate() {
-            self.format_declaration(item, buffer);
-            if i < declarations.len() - 1 {
-                self.line_break_preserve_whitespace(item.get_end_token(), buffer);
-            }
-        }
+        let align = buffer.config().align_declarations;
+        self.format_aligned_items(
+            declarations,
+            buffer,
+            |item| {
+                if align {
+                    match &item.item {
+                        Declaration::Object(object) => Some(object.colon_token),
+                        Declaration::File(file) => Some(file.colon_token),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            },
+            |item| item.span,
+            |i, item, buffer| {
+                self.format_declaration(item, buffer);
+                if i < declarations.len() - 1 {
+                    self.line_break_preserve_whitespace(item.get_end_token(), buffer);
+                }
+            },
+        );
     }
 
     pub fn format_declaration(
@@ -359,11 +376,25 @@ impl VHDLFormatter<'_> {
         self.format_token_id(span.start_token, buffer);
         let mut last_token = span.start_token;
         indented!(buffer, {
-            for element in elements {
-                buffer.line_break();
-                self.format_element_declaration(element, buffer);
-                last_token = element.span.end_token;
-            }
+            let align = buffer.config().align_declarations;
+            buffer.line_break();
+            self.format_aligned_items(
+                elements,
+                buffer,
+                |item| align.then_some(item.colon_token),
+                |item| item.span,
+                |i, element, buffer| {
+                    self.format_element_declaration(element, buffer);
+                    last_token = element.span.end_token;
+                    if i + 1 < elements.len() {
+                        if align {
+                            self.line_break_preserve_whitespace(last_token, buffer);
+                        } else {
+                            buffer.line_break();
+                        }
+                    }
+                },
+            );
         });
         buffer.line_break();
         // end record

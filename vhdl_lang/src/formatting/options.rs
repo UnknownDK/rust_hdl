@@ -20,6 +20,10 @@ pub struct FormatConfig {
     /// Spaces per indentation level.
     pub indent_width: usize,
     pub keyword_case: KeywordCase,
+    /// Align colons in adjacent object/interface declarations.
+    pub align_declarations: bool,
+    /// Align arrows in adjacent named port/generic map associations.
+    pub align_associations: bool,
 }
 
 impl Default for FormatConfig {
@@ -28,6 +32,68 @@ impl Default for FormatConfig {
             max_width: 100,
             indent_width: 4,
             keyword_case: KeywordCase::Lower,
+            align_declarations: false,
+            align_associations: false,
         }
+    }
+}
+
+impl FormatConfig {
+    /// Read the optional `[format]` section of a project TOML file. Other
+    /// project sections are ignored; unknown formatter options are errors.
+    pub fn from_toml(text: &str) -> Result<Self, String> {
+        let root = text.parse::<toml::Table>().map_err(|err| err.to_string())?;
+        let mut config = Self::default();
+        let Some(section) = root.get("format") else {
+            return Ok(config);
+        };
+        let table = section.as_table().ok_or("format must be a table")?;
+        for (key, value) in table {
+            match key.as_str() {
+                "max_width" | "indent_width" => {
+                    let number = value
+                        .as_integer()
+                        .and_then(|n| usize::try_from(n).ok())
+                        .ok_or_else(|| format!("format.{key} must be a nonnegative integer"))?;
+                    if key == "max_width" {
+                        config.max_width = number;
+                    } else {
+                        config.indent_width = number;
+                    }
+                }
+                "keyword_case" => {
+                    config.keyword_case = match value.as_str() {
+                        Some("lower") => KeywordCase::Lower,
+                        Some("upper") => KeywordCase::Upper,
+                        _ => return Err("format.keyword_case must be 'lower' or 'upper'".into()),
+                    }
+                }
+                "align_declarations" | "align_associations" => {
+                    let enabled = value
+                        .as_bool()
+                        .ok_or_else(|| format!("format.{key} must be a boolean"))?;
+                    if key == "align_declarations" {
+                        config.align_declarations = enabled;
+                    } else {
+                        config.align_associations = enabled;
+                    }
+                }
+                _ => return Err(format!("unknown formatter option format.{key}")),
+            }
+        }
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Bound user-supplied settings to avoid accidental huge allocations.
+    /// Zero indentation is supported; a line width must be positive.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(1..=10_000).contains(&self.max_width) {
+            return Err("format.max_width must be between 1 and 10000".into());
+        }
+        if self.indent_width > 32 {
+            return Err("format.indent_width must be between 0 and 32".into());
+        }
+        Ok(())
     }
 }

@@ -5,6 +5,18 @@
   "description": "Configuration schema for vhdl_ls, the VHDL language server. Defines libraries, linting rules, and code formatting preferences.",
   "type": "object",
   "properties": {
+    "format": {
+      "description": "Optional formatter settings. CLI options override these values; alignment defaults to disabled.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_width": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 100 },
+        "indent_width": { "type": "integer", "minimum": 0, "maximum": 32, "default": 4 },
+        "keyword_case": { "type": "string", "enum": ["lower", "upper"], "default": "lower" },
+        "align_declarations": { "type": "boolean", "default": false },
+        "align_associations": { "type": "boolean", "default": false }
+      }
+    },
     "preferred_case": {
       "description": "The preferred letter case for code completions and suggestions (e.g., lower, upper_snake, pascal)\nhttps://github.com/VHDL-LS/rust_hdl/wiki/VHDL%E2%80%90LS-Configuration#preferred_case",
       "type": "string",
