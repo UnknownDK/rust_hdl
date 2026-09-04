@@ -1,224 +1,13 @@
-# Overview
+# rust_hdl — VHDL formatter fork
 
-This repository contains a fast VHDL language server and analysis library written in Rust.
+Beware - AI has been used heavily, since I don't know rust.
 
-The speed makes the tool very pleasant to use since it loads projects really fast and does not consume a lot of ram.
-A 200.000 line VHDL project is analyzed in 160 ms on my Desktop using 8 cores and only consumes 180 MByte of RAM when
-loaded.
 
-I very much appreciate help from other people especially regarding semantic analysis of VHDL. You do not need to be a
-programmer to help, it is even more helpful to interpret and clarify the VHDL standard and provide minimal examples and
-describe how they should work according to the standard. Further information about contributing can be found by reading
-the [Contributors Guide](https://github.com/kraigher/rust_hdl/wiki/Contributor-Guide)
-
-[![Chat](https://img.shields.io/matrix/VHDL-LS:matrix.org)](https://matrix.to/#/#VHDL-LS:matrix.org)
-[![Build Status](https://github.com/kraigher/rust_hdl/workflows/Build%20%26%20test%20all%20configs/badge.svg)](https://github.com/kraigher/rust_hdl/actions?query=workflow%3A%22Build+%26+test+all+configs%22)
-
-## Contributors
-
-- Maintainer: [Lukas Scheller](https://github.com/Schottkyc137)
-- Founder: [Olof Kraigher](https://github.com/kraigher)
-
-# Projects
-
-## VHDL Language Server
-
-[![vhdl ls crate](https://img.shields.io/crates/v/vhdl_ls.svg)](https://crates.io/crates/vhdl_ls)
-
-### Goals
-
-- A complete VHDL language server protocol implementation with diagnostics, navigate to symbol, find all references etc.
-
-### Features
-
-- Live syntax and type checking
-- Checks for missing and duplicate declarations
-- Supports goto-definition/declaration (also in presence of overloading)
-- Supports find-references (also in presence of overloading)
-- Supports goto-implementation
-    - From component declaration to matching entity by default binding
-    - From entity to matching component declaration by default binding
-- Supports hovering symbols
-- Rename symbol
-- Find workspace symbols
-- View/find document symbols
-
-## When Installing it from Crate
-
-When installing the VHDL_LS from [crates.io](https://crates.io/crates/vhdl_ls) the required  
-[vhdl_libraries](https://github.com/VHDL-LS/rust_hdl/tree/master/vhdl_libraries) directory will not be installed
-automatically and  
-will need to be copied into the parent directory of the VHDL_LS binary manually.
-
-## Trying it out
-
-A language server is never used directly by the end user and it is integrated into different editor plugins. The ones I
-know about are listed here.
-
-## Use in VS Code
-
-### VHDL-LS
-Official client from [VHDL-LS](https://github.com/VHDL-LS):
-- Github: [rust_hdl_vscode](https://github.com/Bochlin/rust_hdl_vscode)
-- Visual Studio Marketplace: [VHDL LS](https://marketplace.visualstudio.com/items?itemName=hbohlin.vhdl-ls)
-
-### VHDL by HGB
-Client from the University of Applied Sciences Upper Austria - [Campus Hagenberg](https://fh-ooe.at/en/campus-hagenberg):
-- Github: [VHDL-by-HGB](https://github.com/HSD-ESD/VHDL-by-HGB)
-- Visual Studio Marketplace: [VHDL by HGB](https://marketplace.visualstudio.com/items?itemName=P2L2.vhdl-by-hgb)
-- Open VSX: [VHDL by HGB](https://open-vsx.org/extension/p2l2/vhdl-by-hgb)
-
-## Use in emacs
-
-VHDL LS has built-in support by emacs `lsp-mode` since 2020-01-04.
-
-It can be set up automatically by installing the package
-[`vhdl-ext`](https://github.com/gmlarumbe/vhdl-ext/) and adding the
-following snippet to your config:
-
-```elisp
-(require 'vhdl-ext)
-(vhdl-ext-mode-setup)
-(vhdl-ext-eglot-set-server 've-rust-hdl) ;`eglot' config
-(vhdl-ext-lsp-set-server 've-rust-hdl)   ; `lsp' config
-```
-
-A `.el` script for creating and maintaining TOML configuration files is available [in this repo](https://github.com/bjfer/hdl-toml).
-
-## Installation for Neovim
-
-### Automatic Installation
-
-You can install `rust_hdl` automatically in Neovim using [`:Mason`](https://github.com/williamboman/mason.nvim). Within
-Mason, the package is called `rust_hdl`. If you don't have `:Mason`, you can simply install the binary as previously
-described.
-
-### Automatic Configuration using `nvim-lspconfig`
-
-[`nvim-lspconfig`](https://github.com/neovim/nvim-lspconfig) has a built in configuration
-for [`vhdl_ls`](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#vhdl_ls)
-
-In order to configure it, simply add
-
-```lua
-lspconfig = require('lspconfig')
-lspconfig['vhdl_ls'].setup({
-  on_attach = on_attach,
-  capabilities = capabilities
-})
-```
-
-### Manual Configuration using Neovim's built in client
-
-Neovim provides an LSP client to the VHDL_LS language server. Download the  
-VHDL_LS release. The binary must be on the path and executable (if you can run  
-"vhdl_ls -h" in the terminal then you're good).
-
-In your Neovim config.lua add the following:
-
-```lua
-function STARTVHDLLS()
-  vim.lsp.start({
-    name = 'vhdl_ls',
-    cmd = {'vhdl_ls'},
-  })
-end
-vim.api.nvim_set_keymap('n', '<F5>', ':lua STARTVHDLLS()<CR>', { noremap = true, silent = true })
-```
-
-Using the example above, pressing F5 while inside Neovim starts the language  
-server. There are also other options, like automatically starting it when  
-opening a certain file type, see the [Neovim LSP documentation](https://neovim.io/doc/user/lsp.html) for more.
-
-## Configuration
-
-The language server needs to know your library mapping to perform full analysis of the code. For this it uses a configuration file in the [TOML](https://github.com/toml-lang/toml) format named `vhdl_ls.toml`.
-
-> [!NOTE]
-> Read the full documentation in [the wiki](https://github.com/VHDL-LS/rust_hdl/wiki/VHDL%E2%80%90LS-Configuration)
-
-### Example vhdl_ls.toml / Quickstart
-
-```toml
-# What standard to use. This is optional and defaults to VHDL 2008.
-standard = "2008"
-# The preferred case for completions.
-preferred_case = "lower"
-# File names are either absolute or relative to the parent folder of the vhdl_ls.toml file
-[libraries]
-lib2.files = [
-    'pkg2.vhd',
-]
-lib1.files = [
-    'pkg1.vhd',
-    'tb_ent.vhd'
-]
-
-# Wildcards and exclude patterns are supported
-lib3.files = [
-    'test/*.vhd',
-    'src/*.vhd',
-    'src/*/*.vhd',
-]
-lib3.exclude = [
-    'test/*_old.vhd',
-]
-
-# Libraries can be marked as third-party to disable some analysis warnings, such as unused declarations
-UNISIM.files = [
-    'C:\Xilinx\Vivado\2023.1\data\vhdl\src\unisims\unisim_VCOMP.vhd',
-]
-UNISIM.is_third_party = true
-
-[lint]
-unused = 'error' # Upgrade the 'unused' diagnostic to the 'error' severity
-unnecessary_work_library = false # Disable linting for the 'library work;' statement
-```
-
-## Ignoring errors
-
-You can use the comment-pair `-- vhdl_ls off` and `-- vhdl_ls on` to conditionally disable and re-enable parsing of
-source code. This can be helpful to ignore errors from correct code that vhdl_ls does not yet support, i.e., PSL
-statements or certain VHDL-2019 constructs.
-
-```vhdl
-library ieee;
-    use ieee.std_logic_1164.all;
-
-entity ent is
-    port (
-       clk : in std_logic
-    );
-end entity;
-
-architecture arch of ent is
-begin
-    -- vhdl_ls off
-    default clock is rising_edge(clk);
-    -- vhdl_ls on
-end architecture;
-```
-
-## As an LSP-client developer how should I integrate VHDL-LS?
-
-I recommend that the `lsp-client` polls GitHub and downloads
-the [latest](https://github.com/VHDL-LS/rust_hdl/releases/latest) VHDL-LS release from GitHub.
-
-VHDL-LS has frequent releases and the automatic update ensures minimal maintenance for the `lsp-client` developer as
-well as ensuring the users are not running and outdated version.
-
-## VHDL Language Frontend
-
-[![vhdl language frontend crate](https://img.shields.io/crates/v/vhdl_lang.svg)](https://crates.io/crates/vhdl_lang)
-
-### Goals
-
-- This project aims to provide a fully featured open source VHDL frontend that is easy to integrate into other tools.
-- A design goal of the frontend is to be able to recover from syntax errors such that it is useful for building a
-  language server.
-- Analysis order must be automatically computed such that the user does not have to maintain a compile order.
-- Comments will be part of the AST to support document generation.
-- Separate parsing from semantic analysis to allow code formatting on non-semantically correct code.
+This fork of [VHDL-LS/rust_hdl](https://github.com/VHDL-LS/rust_hdl) adds an
+experimental, configurable VHDL formatter to the `vhdl_lang` CLI and library.
+It supports width-aware wrapping, lower/uppercase keywords, argument-count
+wrapping and optional alignment, with token and comment preservation checks.
+See [VHDL formatter](#vhdl-formatter) for building, configuration and usage.
 
 ## VHDL formatter
 
@@ -237,6 +26,13 @@ editor formatter, use `--format-stdin` and pass the document path through
 `--stdin-filepath` for diagnostics and project configuration discovery. The CLI
 defaults to VHDL-2008; `--standard 1993|2008|2019` overrides the project standard.
 The library API accepts a parser configured for any of those standards.
+
+Both file and stdin input default to UTF-8. For legacy ISO-8859-1 input, pass
+`--input-encoding latin1` explicitly; invalid UTF-8 otherwise fails without
+formatted output. Output is always UTF-8, including when Latin-1 input is
+selected. This replaces the formatter's previous implicit Latin-1 file decoding
+and makes file and stdin behavior consistent. It does not change the language
+server's source-loading policy.
 
 The defaults are `max_width = 100`, `indent_width = 4` and
 `keyword_case = lower`. Keyword case supports `lower` and `upper`, including word
@@ -315,11 +111,26 @@ preserves original disabled-region line endings before `Source` normalizes them.
 The CLI uses this raw-text entry point. The lower-level AST-only
 `VHDLFormatter::format_design_file` does not provide source-preservation checks.
 
+**Warning:** `vhdl_ls off/on` disables parsing and language-server analysis of
+the enclosed text as well as formatting. It is not a formatter-only ignore
+mechanism; declarations and references in that region are invisible to analysis.
+
 Code between exact `-- vhdl_ls off` and `-- vhdl_ls on` directives remains
 unchanged while surrounding code is formatted. An unmatched `off` extends to
 EOF. Trailing directives and block-comment directives are also supported;
-occurrences inside strings, identifiers or ordinary comment prose are not
-directives. Disabled text need not be valid VHDL.
+an `off` inside a string, identifier or ordinary comment prose does not start a
+region. Within a disabled region, only comment boundaries are scanned to find
+`on`; strings and other source syntax are not validated. Disabled text need not
+be valid VHDL.
+
+```vhdl
+-- vhdl_ls off
+-- This region is preserved verbatim and excluded from analysis.
+-- vhdl_ls on
+```
+
+Directive names are case-sensitive. A block comment can span multiple lines,
+but its entire trimmed contents must equal `vhdl_ls off` or `vhdl_ls on`.
 
 See [formatter tests and implementation notes](vhdl_lang/tests/formatting/README.md)
 for layout policy, corpus coverage and benchmark commands. Identifier case

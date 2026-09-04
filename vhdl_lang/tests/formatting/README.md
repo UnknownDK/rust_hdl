@@ -89,11 +89,17 @@ enabled text passes verification, the exact original region replaces its
 anchor. The tokenizer skips disabled contents without trying to lex malformed
 strings or invalid characters. Diagnostics are mapped back to original source
 positions. Directive names are case-sensitive, matching the tokenizer's policy.
+Both line and multiline block comments support directives; only the entire
+trimmed comment contents count, not a mention embedded in prose. Disabled text
+is also excluded from parsing and language-server analysis, not just formatting.
+Declarations and references inside it are therefore invisible to analysis.
 
 `Source` already normalizes newlines. To preserve raw CRLF text in disabled
 sections, use `format_text_with_config`; the CLI does so automatically. Enabled
-text is normalized to LF. File-mode input retains the existing Latin-1 decoding
-policy, stdin accepts UTF-8, and output is UTF-8.
+text is normalized to LF. Both file and stdin input default to UTF-8, reject
+invalid bytes without stdout, and accept legacy ISO-8859-1 only with explicit
+`--input-encoding latin1`. Output is always UTF-8. CLI tests exercise non-ASCII
+literals/comments and both encodings in both input modes.
 
 ## Tests and corpus
 
@@ -114,7 +120,9 @@ width fallback and idempotency. Configuration tests cover TOML loading and CLI
 overrides for the threshold in both file and stdin modes.
 
 `format_corpus.rs` uses six version-controlled IEEE sources, each carrying an
-Apache-2.0 notice under `vhdl_libraries/ieee2008`:
+Apache-2.0 notice under `tests/formatting/corpus/ieee2008` within the crate.
+[Corpus provenance and checksums](corpus/README.md) identify the unchanged source
+snapshots; they are included in Cargo source packages:
 
 - `math_real.vhdl` and `math_real-body.vhdl`: VHDL-1993, 2008 and 2019.
 - `std_logic_1164.vhdl`, `std_logic_1164-body.vhdl`, `numeric_std.vhdl` and
@@ -126,6 +134,9 @@ and idempotency. Compile-time file
 inclusion prevents an empty corpus from silently passing. The separate
 `format_example_project` test covers optional populated example-project
 submodules using the same verified API and reports the number of files checked.
+It explicitly reports a skip when the example-project directory is absent.
+Golden fixtures and corpus snapshots are pinned to LF by `.gitattributes`, so
+Windows checkouts do not change the expected strings or benchmark inputs.
 The bundled corpus emphasizes library declarations and algorithmic bodies;
 synthetic RTL fixtures cover processes, instantiations and generate structures.
 
@@ -137,25 +148,20 @@ python3 vhdl_lang/benches/compare_formatter.py BASELINE_BINARY CURRENT_BINARY
 ```
 
 Use equally optimized binaries and run comparisons while no other build is
-active. The in-process benchmark includes both parsing passes and safety checks;
+active. The comparison script uses two warm-ups and ten measured runs per input,
+reports medians, and disables project configuration discovery. Both binaries
+must support `--no-format-config`. Record their exact Git commits, `rustc -Vv`,
+build profile, CPU/OS and benchmark command with any published measurements.
+The in-process benchmark includes both parsing passes and safety checks;
 the CLI comparison also includes process startup and file I/O. Absolute timings
 depend on the host. The development target is less than 20% latency regression
 per milestone, prioritizing correctness.
 
-Historical layout-migration validation on 2026-09-04, before optional alignment
-and project configuration (optimized builds, default formatter options):
-
-| Input | Bytes | API mean | Baseline CLI median | Current CLI median | CLI change |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `std_logic_1164-body.vhdl` | 57,019 | 6.44 ms | 10.01 ms | 11.18 ms | +11.7% |
-| `numeric_std-body.vhdl` | 139,714 | 20.14 ms | 25.57 ms | 27.55 ms | +7.8% |
-
-API means use 100 benchmark samples. CLI medians use 10 measured runs after two
-warm-ups, compared with the saved pre-change release binary. These are local
-measurements, not cross-machine performance guarantees. All 28 corpus
-file/version/case combinations passed, as did workspace tests and strict Clippy.
-
-The user confirmed that the existing external formatter works well in Zed.
-Configuration discovery and stdin/API parity are also exercised automatically
-in `format_config.rs` and `format_cli.rs`. When changing editor integration,
-repeat the live checks for invalid input and a second, idempotent save.
+For a manual Zed smoke test, configure the external formatter to invoke the
+locally built `vhdl_lang` with `--format-stdin --stdin-filepath {buffer_path}`.
+Check a valid file with project settings, an unsaved buffer, a file with
+non-ASCII comments, and invalid VHDL. Invalid input should report an error without
+replacing the buffer. A second save of valid formatted input must make no changes.
+Configuration discovery and stdin/API parity are exercised automatically in
+`format_config.rs` and `format_cli.rs`; repeat these live checks when changing
+editor integration.
