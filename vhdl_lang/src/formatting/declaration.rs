@@ -12,8 +12,7 @@ use crate::ast::{
 };
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
-use crate::syntax::Kind;
-use crate::{indented, HasTokenSpan, TokenAccess, TokenId, TokenSpan};
+use crate::{indented, HasTokenSpan, TokenId, TokenSpan};
 use vhdl_lang::ast::token_range::WithTokenSpan;
 use vhdl_lang::ast::{
     AliasDeclaration, Attribute, AttributeDeclaration, AttributeSpecification, Declaration,
@@ -241,19 +240,21 @@ impl VHDLFormatter<'_> {
         use TypeDefinition::*;
         match definition {
             Enumeration(literals) => {
-                self.format_token_id(span.start_token, buffer);
-                for literal in literals {
-                    self.format_token_id(literal.tree.token, buffer);
-                    if self
-                        .tokens
-                        .get_token(literal.tree.token + 1)
-                        .is_some_and(|token| token.kind == Kind::Comma)
-                    {
-                        self.format_token_id(literal.tree.token + 1, buffer);
-                        buffer.push_whitespace();
-                    }
-                }
-                self.format_token_id(span.end_token, buffer);
+                buffer.group(|buffer| {
+                    self.format_token_id(span.start_token, buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_break(false);
+                        for (i, literal) in literals.iter().enumerate() {
+                            self.format_token_id(literal.tree.token, buffer);
+                            if i + 1 < literals.len() {
+                                self.format_token_id(literal.tree.token + 1, buffer);
+                                buffer.soft_line();
+                            }
+                        }
+                    });
+                    buffer.soft_break(false);
+                    self.format_token_id(span.end_token, buffer);
+                });
             }
             Numeric(range) => {
                 self.format_token_id(span.start_token, buffer);
@@ -337,39 +338,50 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        // array
-        self.format_token_id(span.start_token, buffer);
-        buffer.push_whitespace();
-        // (
-        self.format_token_id(span.start_token + 1, buffer);
-        for (i, index) in indices.iter().enumerate() {
-            let end_token = match index {
-                ArrayIndex::IndexSubtypeDefintion(name) => {
-                    self.format_name(name.as_ref(), buffer);
-                    buffer.push_whitespace();
-                    self.format_token_span(
-                        TokenSpan::new(name.span.end_token + 1, name.span.end_token + 2),
-                        buffer,
-                    );
-                    name.span.end_token + 3
-                }
-                ArrayIndex::Discrete(discrete_range) => {
-                    self.format_discrete_range(&discrete_range.item, buffer);
-                    discrete_range.span.end_token + 1
-                }
-            };
-            if i < indices.len() - 1 {
-                self.format_token_id(end_token, buffer);
-                buffer.push_whitespace();
-            }
-        }
-        // )
-        self.format_token_id(of_token - 1, buffer);
-        buffer.push_whitespace();
-        // of
-        self.format_token_id(of_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(subtype, buffer);
+        buffer.fill_group(|buffer| {
+            buffer.group(|buffer| {
+                // array (
+                self.format_token_span(
+                    TokenSpan::new(span.start_token, span.start_token + 1),
+                    buffer,
+                );
+                buffer.with_indent(|buffer| {
+                    buffer.soft_break(false);
+                    for (i, index) in indices.iter().enumerate() {
+                        let end_token = match index {
+                            ArrayIndex::IndexSubtypeDefintion(name) => {
+                                self.format_name(name.as_ref(), buffer);
+                                buffer.push_whitespace();
+                                self.format_token_span(
+                                    TokenSpan::new(
+                                        name.span.end_token + 1,
+                                        name.span.end_token + 2,
+                                    ),
+                                    buffer,
+                                );
+                                name.span.end_token + 3
+                            }
+                            ArrayIndex::Discrete(discrete_range) => {
+                                self.format_discrete_range(&discrete_range.item, buffer);
+                                discrete_range.span.end_token + 1
+                            }
+                        };
+                        if i + 1 < indices.len() {
+                            self.format_token_id(end_token, buffer);
+                            buffer.soft_line();
+                        }
+                    }
+                });
+                buffer.soft_break(false);
+                self.format_token_id(of_token - 1, buffer);
+            });
+            buffer.push_whitespace();
+            self.format_token_id(of_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.preferred_line();
+                self.format_subtype_indication(subtype, buffer);
+            });
+        });
     }
 
     pub fn format_record_declaration(

@@ -38,6 +38,24 @@ is preferred to splitting its range. Otherwise the existing internal breaks are
 used. Defaults remain separate groups, so a long default does not unnecessarily
 expand a short type. No child document is rendered during this decision.
 
+Enumeration literals and array dimensions are width-aware delimiter groups,
+independent of `inline_argument_limit`. Expanded lists break after the opening
+parenthesis, between items and before the closing parenthesis. Dimensions retain
+their own range/expression wrapping. Array element types use a preferred break
+after `of`, keeping the complete type together before splitting its constraint.
+
+Simple timed or multi-element signal assignments group the break after `<=`
+with their waveform separators. When expanded, the first element and all later
+elements start on separate continuation lines. Short waveforms remain inline;
+untimed single-expression assignments retain their existing local wrapping.
+Concurrent and sequential signal assignments share this implementation. Each
+waveform element independently groups its value and delay, breaking before
+`after` at one further indentation level when necessary. There is no optional
+break immediately after `after`; delay expressions can still wrap internally,
+and a comment can require a line break. An indivisible timing clause may exceed
+very narrow widths. Selected and conditional assignments retain their existing
+branch layout while using the same element-level timing rules.
+
 Selected assignments group `with ... select` and their body together. When the
 statement expands, its target starts on a new indented line; the first value
 stays beside the target when possible and later alternatives use continuation
@@ -103,6 +121,14 @@ declaration alignment enabled. `format_layout_consistency.rs` checks the exact
 output, short and narrow layouts, selection modifiers and language versions,
 plus comment preservation/idempotency across 144 option combinations. Renderer
 unit tests cover the preferred break's flat, whole-type and internal-wrap cases.
+
+`types_and_waveforms.input.vhd` and `types_and_waveforms.expected.vhd` show
+enumerations, array dimensions and timed waveforms at width 60.
+`format_types_and_waveforms.rs` checks these golden layouts, exact width
+boundaries, short forms, constrained dimensions, whole-type and narrow-width
+fallbacks, timing modifiers, selected/conditional waveforms and all three
+language standards. Comment anchoring and idempotency are exercised across 144
+width/indent/argument-limit/casing/alignment combinations.
 
 `alignment_rtl.input.vhd` and `alignment_rtl.expected.vhd` provide a reviewed,
 synthetic RTL style baseline with a state machine, payload registers, interface
