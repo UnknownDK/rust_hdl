@@ -9,17 +9,24 @@ the final render.
 Argument lists flatten only when they fit and their count is at most
 `inline_argument_limit` (default 2). Above that count, each list item gets its own
 line even at wide line widths. The rule covers calls/indexed names, subprogram
-parameters, generic/port maps and generic/port interfaces. Grouped names in an
-interface declaration count individually without changing the grouping's tokens.
-Empty lists remain compact; zero forces all nonempty lists to expand. Slices,
+parameters, generic/port maps, generic/port interfaces and aggregates containing
+named associations. Each aggregate association counts once, including positional
+entries in mixed aggregates. Grouped names in an interface declaration count
+individually without changing the grouping's tokens. Empty lists remain compact;
+zero forces all nonempty covered lists to expand. Slices, purely positional
 aggregates, sensitivity lists and ordinary parenthesized expressions keep their
-existing width-aware rules. Nested groups choose independently. Statement continuation groups decide
-their spaces/breaks locally, so an assignment prefix can remain beside a call
+existing width-aware rules. Nested groups choose independently. Statement
+continuation groups decide their spaces/breaks locally, so an assignment prefix can remain beside a call
 whose arguments wrap. Expressions inherit the indentation of the physical line
 where they start; their closing delimiters return to that level. Multi-item
-port/generic maps and interface lists follow the shared argument limit. Binary operators
-lead continuation lines; the left spine of a binary-expression tree does not
-produce increasing indentation. Existing parentheses are retained.
+port/generic maps and interface lists follow the shared argument limit. Binary
+operators lead continuation lines. Same-precedence operators share a layout group along
+the left spine, without staircase indentation. Tighter operands get independent
+groups, so wrapping a logical chain does not unnecessarily split a comparison,
+and wrapping a sum does not split products that fit. Concatenations also keep
+arithmetic operands in separate groups. Existing parentheses are retained.
+`if`/`elsif` headers group their condition with a break before `then`: expanded
+headers place `then` at the statement indentation; short headers remain inline.
 
 Function headers use local continuation decisions so an expanded parameter list
 does not force `return` onto a new line after `)`. The return type and `is` remain
@@ -37,11 +44,12 @@ Original spaces within comment text and disabled regions remain untouched.
 
 `align_declarations` and `align_associations` are opt-in. The former aligns
 colons in object/file declarations, interfaces and record fields; the latter
-aligns named port/generic map arrows. It does not align modes, types, default
-expressions, assignments, ordinary calls or aggregates.
+aligns named port/generic map and aggregate arrows. It does not align modes,
+types, default expressions, assignments or ordinary calls.
 Inline lists do not receive alignment padding. In interfaces and maps, column
-alignment applies to lists expanded by the argument limit; short lists that wrap
-only for width/comments retain ordinary spacing.
+alignment applies to lists expanded by the argument limit; this also applies to
+named aggregates. Short lists that wrap only for width/comments retain ordinary
+spacing.
 
 Rows carry an `Align` document primitive, not literal spaces in token text.
 Adjacent single-line rows are measured using document width summaries. The
@@ -52,6 +60,23 @@ standalone comments, positional associations and other declaration kinds are
 also boundaries. A standalone leading comment starts a new group with its
 following declaration; rows with internal or trailing comments are excluded.
 Padding is lazy and summaries are refreshed before enclosing groups are built.
+Aggregate comma comments participate in boundary detection; nested multiline
+values split alignment runs while small nested aggregates can stay inline.
+
+## Structural spacing
+
+Context clauses are separated from their design unit by one blank line; context
+declaration bodies retain ordinary spacing. A process is separated from each
+neighboring concurrent statement, and a subprogram body from each neighboring
+declaration, by one blank line. No extra blank line is added at list edges.
+Existing declaration groups are preserved, multiple empty lines collapse to one,
+and separation is inserted before leading documentation comments. Disabled
+regions and comment contents retain their preservation guarantees.
+
+`readability.input.vhd` and `readability.expected.vhd` illustrate these rules at
+width 60 with association alignment enabled. `format_readability.rs` checks
+exact layouts, language versions, comment and positional boundaries, nesting,
+width fallback and preservation/idempotency across 180 option combinations.
 
 `alignment_rtl.input.vhd` and `alignment_rtl.expected.vhd` provide a reviewed,
 synthetic RTL style baseline with a state machine, payload registers, interface

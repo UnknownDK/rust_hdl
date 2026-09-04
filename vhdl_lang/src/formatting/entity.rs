@@ -13,10 +13,7 @@ use vhdl_lang::indented;
 
 impl VHDLFormatter<'_> {
     pub fn format_entity(&self, entity: &EntityDeclaration, buffer: &mut Buffer) {
-        self.format_context_clause(&entity.context_clause, buffer);
-        if let Some(item) = entity.context_clause.last() {
-            self.line_break_preserve_whitespace(item.span().end_token, buffer);
-        }
+        self.format_design_context(&entity.context_clause, buffer);
         let span = entity.span();
         // entity <ident> is
         self.format_token_span(TokenSpan::new(span.start_token, entity.is_token()), buffer);

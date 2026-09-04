@@ -12,7 +12,7 @@ use crate::ast::{
 };
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
-use crate::HasTokenSpan;
+use crate::{HasTokenSpan, TokenAccess, TokenSpan};
 use vhdl_lang::ast::{Allocator, QualifiedExpression};
 
 impl VHDLFormatter<'_> {
@@ -56,11 +56,19 @@ impl VHDLFormatter<'_> {
         }
     }
 
-    // Walk the left spine at the same indentation: a + b + c must not become
-    // a staircase just because binary operators are represented as a tree.
+    // Walk same-precedence chains at one indentation, but give tighter operands
+    // their own groups: a comparison should not break just because `and` does.
+    // Concatenation also keeps neighboring arithmetic in independent groups.
     fn format_binary_chain(&self, expression: WithTokenSpan<&Expression>, buffer: &mut Buffer) {
         if let Expression::Binary(op, lhs, rhs) = expression.item {
-            self.format_binary_chain(lhs.as_ref().as_ref(), buffer);
+            let same_chain = matches!(&lhs.item, Expression::Binary(left_op, ..)
+                if left_op.item.item.binary_precedence() == op.item.item.binary_precedence()
+                    && (left_op.item.item == Operator::Concat) == (op.item.item == Operator::Concat));
+            if same_chain {
+                self.format_binary_chain(lhs.as_ref().as_ref(), buffer);
+            } else {
+                self.format_expression(lhs.as_ref().as_ref(), buffer);
+            }
             buffer.with_indent(|buffer| {
                 buffer.soft_line();
                 self.format_token_id(op.token, buffer);
@@ -97,35 +105,84 @@ impl VHDLFormatter<'_> {
         associations: &[WithTokenSpan<ElementAssociation>],
         buffer: &mut Buffer,
     ) {
-        for (i, association) in associations.iter().enumerate() {
-            buffer.fill_group(|buffer| match &association.item {
-                ElementAssociation::Positional(expression) => {
-                    self.format_expression(expression.as_ref(), buffer)
+        let multiline = self.expand_named_aggregate(associations, buffer);
+        let align = multiline && buffer.config().align_associations;
+        self.format_aligned_items(
+            associations,
+            buffer,
+            |association| match &association.item {
+                ElementAssociation::Named(_, expression) if align => {
+                    Some(expression.span.start_token - 1)
                 }
-                ElementAssociation::Named(choices, expression) => {
-                    buffer.group(|buffer| {
-                        for (j, choice) in choices.iter().enumerate() {
-                            self.format_choice(choice, buffer);
-                            if j < choices.len() - 1 {
-                                buffer.soft_line();
-                                self.format_token_id(choice.span.end_token + 1, buffer);
-                                buffer.push_whitespace();
-                            }
-                        }
-                    });
-                    buffer.push_whitespace();
-                    self.format_token_id(expression.span.start_token - 1, buffer);
-                    buffer.with_indent(|buffer| {
+                _ => None,
+            },
+            |association| {
+                // A trailing comment normally belongs to the comma, not the
+                // expression. Include it when finding alignment boundaries.
+                let end = association.span.end_token;
+                let comma = self
+                    .tokens
+                    .get_token(end + 1)
+                    .is_some_and(|token| token.kind == crate::syntax::Kind::Comma);
+                TokenSpan::new(
+                    association.span.start_token,
+                    if comma { end + 1 } else { end },
+                )
+            },
+            |i, association, buffer| {
+                self.format_element_association(association, buffer);
+                if i + 1 < associations.len() {
+                    let comma = association.span.end_token + 1;
+                    self.format_token_id(comma, buffer);
+                    if multiline {
+                        self.line_break_preserve_whitespace(comma, buffer);
+                    } else {
                         buffer.soft_line();
-                        self.format_expression(expression.as_ref(), buffer);
-                    });
+                    }
                 }
-            });
-            if i < associations.len() - 1 {
-                self.format_token_id(association.span.end_token + 1, buffer);
-                buffer.soft_line();
+            },
+        );
+    }
+
+    pub(crate) fn expand_named_aggregate(
+        &self,
+        associations: &[WithTokenSpan<ElementAssociation>],
+        buffer: &Buffer,
+    ) -> bool {
+        associations.len() > buffer.config().inline_argument_limit
+            && associations
+                .iter()
+                .any(|association| matches!(association.item, ElementAssociation::Named(..)))
+    }
+
+    fn format_element_association(
+        &self,
+        association: &WithTokenSpan<ElementAssociation>,
+        buffer: &mut Buffer,
+    ) {
+        buffer.fill_group(|buffer| match &association.item {
+            ElementAssociation::Positional(expression) => {
+                self.format_expression(expression.as_ref(), buffer)
             }
-        }
+            ElementAssociation::Named(choices, expression) => {
+                buffer.group(|buffer| {
+                    for (j, choice) in choices.iter().enumerate() {
+                        self.format_choice(choice, buffer);
+                        if j < choices.len() - 1 {
+                            buffer.soft_line();
+                            self.format_token_id(choice.span.end_token + 1, buffer);
+                            buffer.push_whitespace();
+                        }
+                    }
+                });
+                buffer.push_whitespace();
+                self.format_token_id(expression.span.start_token - 1, buffer);
+                buffer.with_indent(|buffer| {
+                    buffer.soft_line();
+                    self.format_expression(expression.as_ref(), buffer);
+                });
+            }
+        });
     }
 
     pub fn format_subtype_indication(&self, indication: &SubtypeIndication, buffer: &mut Buffer) {

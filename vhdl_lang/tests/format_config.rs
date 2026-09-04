@@ -85,6 +85,47 @@ fn argument_limit_is_loaded_and_overridden_for_both_input_modes() {
 }
 
 #[test]
+fn aggregates_use_existing_project_settings_and_cli_overrides() {
+    let project = TempDir::new().unwrap();
+    fs::write(
+        project.path().join("vhdl_ls.toml"),
+        "[format]\ninline_argument_limit = 2\nalign_associations = true",
+    )
+    .unwrap();
+    let input =
+        "entity e is end; architecture rtl of e is begin x <= (a => 1, longer => 2, c => 3); end;";
+    let source = project.path().join("example.vhd");
+    fs::write(&source, input).unwrap();
+    for stdin in [true, false] {
+        for flags in [
+            vec![],
+            vec!["--align-associations=false"],
+            vec!["--inline-argument-limit", "3"],
+        ] {
+            let mut cmd = formatter();
+            cmd.current_dir(project.path()).args(&flags);
+            if stdin {
+                cmd.arg("--format-stdin").write_stdin(input);
+            } else {
+                cmd.arg("--format").arg(&source);
+            }
+            let expected = if flags.contains(&"3") {
+                "x <= (a => 1, longer => 2, c => 3);"
+            } else if flags.is_empty() {
+                "x <= (\n        a      => 1,\n        longer => 2,\n        c      => 3\n    );"
+            } else {
+                "x <= (\n        a => 1,\n        longer => 2,\n        c => 3\n    );"
+            };
+            cmd.assert()
+                .success()
+                .stderr("")
+                .stdout(predicate::str::contains(expected));
+        }
+    }
+    assert_eq!(fs::read_to_string(&source).unwrap(), input);
+}
+
+#[test]
 fn stdin_and_files_discover_project_settings_from_the_source_path() {
     let project = TempDir::new().unwrap();
     let elsewhere = TempDir::new().unwrap();

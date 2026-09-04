@@ -12,10 +12,7 @@ use crate::{indented, HasTokenSpan, TokenSpan};
 
 impl VHDLFormatter<'_> {
     pub fn format_architecture(&self, arch: &ArchitectureBody, buffer: &mut Buffer) {
-        self.format_context_clause(&arch.context_clause, buffer);
-        if let Some(item) = arch.context_clause.last() {
-            self.line_break_preserve_whitespace(item.span().end_token, buffer);
-        }
+        self.format_design_context(&arch.context_clause, buffer);
         let span = arch.span();
         // architecture <ident> of <ident> is
         self.format_token_span(TokenSpan::new(span.start_token, arch.is_token()), buffer);
@@ -109,6 +106,7 @@ begin
             end if;
         end if;
     end process bar;
+
     y <= x; -- An assignment
 end foo;",
         );

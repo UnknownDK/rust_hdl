@@ -305,13 +305,15 @@ impl VHDLFormatter<'_> {
     ) {
         for cond in &statement.conds.conditionals {
             let condition = &cond.condition;
-            // if | elsif
-            self.format_token_id(condition.span.start_token - 1, buffer);
-            buffer.push_whitespace();
-            self.format_expression(condition.as_ref(), buffer);
-            buffer.push_whitespace();
-            // then
-            self.format_token_id(condition.span.end_token + 1, buffer);
+            buffer.group(|buffer| {
+                // if | elsif
+                self.format_token_id(condition.span.start_token - 1, buffer);
+                buffer.push_whitespace();
+                self.format_expression(condition.as_ref(), buffer);
+                // Expanded headers put `then` back at the statement indentation.
+                buffer.soft_line();
+                self.format_token_id(condition.span.end_token + 1, buffer);
+            });
             self.format_sequential_statements(&cond.item, buffer);
             buffer.line_break();
         }

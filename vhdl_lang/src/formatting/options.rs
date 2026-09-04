@@ -22,10 +22,11 @@ pub struct FormatConfig {
     pub keyword_case: KeywordCase,
     /// Align colons in adjacent object/interface declarations.
     pub align_declarations: bool,
-    /// Align arrows in adjacent named port/generic map associations.
+    /// Align arrows in adjacent named map and aggregate associations.
     pub align_associations: bool,
     /// Maximum list items to keep inline, when they fit. Zero always expands
-    /// nonempty calls, parameter/interface lists and port/generic maps.
+    /// nonempty calls, parameter/interface lists, maps and named aggregates.
+    /// Purely positional aggregates remain width-driven.
     pub inline_argument_limit: usize,
 }
 
