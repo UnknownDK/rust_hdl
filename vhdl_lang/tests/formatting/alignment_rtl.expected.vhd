@@ -1,10 +1,7 @@
 library ieee;
 use ieee.std_logic_1164.all;
 entity pipeline_stage is
-    generic (
-        DATA_WIDTH      : positive := 32;
-        REGISTER_OUTPUT : boolean := true
-    );
+    generic (DATA_WIDTH : positive := 32; REGISTER_OUTPUT : boolean := true);
     port (
         clk     : in std_logic;
         reset_n : in std_logic;
@@ -55,10 +52,7 @@ begin
         end case;
     end process;
     output_buffer: entity work.output_buffer
-        generic map (
-            WIDTH      => DATA_WIDTH,
-            REGISTERED => REGISTER_OUTPUT
-        )
+        generic map (WIDTH => DATA_WIDTH, REGISTERED => REGISTER_OUTPUT)
         port map (
             clk     => clk,
             reset_n => reset_n,

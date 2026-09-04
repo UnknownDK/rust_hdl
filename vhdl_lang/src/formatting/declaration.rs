@@ -814,13 +814,13 @@ end component foo;",
         check_declaration(
             "\
 component foo is
-    generic ( foo: natural );
+    generic (foo: natural);
 end component;",
         );
         check_declaration(
             "\
 component foo is
-    port ( foo: natural );
+    port (foo: natural);
 end component;",
         );
     }
@@ -853,7 +853,7 @@ end component;",
     #[test]
     fn format_package_instance() {
         check_declaration("package ident is new foo;");
-        check_declaration("package ident is new foo generic map ( foo => bar );");
+        check_declaration("package ident is new foo generic map (foo => bar);");
     }
 
     #[test]

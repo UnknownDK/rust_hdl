@@ -529,8 +529,8 @@ mod tests {
     #[test]
     fn assertions() {
         check_statement("assert x;");
-        check_statement("assert x report y;");
-        check_statement("assert x report y severity NOTE;");
+        check_statement("assert x\n    report y;");
+        check_statement("assert x\n    report y\n    severity NOTE;");
     }
 
     #[test]

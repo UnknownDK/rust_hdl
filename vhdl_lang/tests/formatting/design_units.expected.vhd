@@ -1,8 +1,5 @@
 entity foo is
-    port (
-        a: in std_logic;
-        b: out std_logic
-    );
+    port (a: in std_logic; b: out std_logic);
 end entity;
 
 architecture rtl of foo is

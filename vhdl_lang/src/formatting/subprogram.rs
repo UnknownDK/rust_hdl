@@ -74,7 +74,9 @@ impl VHDLFormatter<'_> {
         specification: &FunctionSpecification,
         buffer: &mut Buffer,
     ) {
-        buffer.group(|buffer| {
+        // A multiline parameter list must not force `return` off the closing
+        // parenthesis line. The return clause still wraps when its suffix cannot fit.
+        buffer.fill_group(|buffer| {
             // function <name>
             self.format_wrapped_token_span(
                 TokenSpan::new(
@@ -240,18 +242,15 @@ mod test {
 
     #[test]
     fn test_subprogram_declaration_one_parameter() {
-        check_subprogram_declaration("procedure foo( a: std_logic );");
-        check_subprogram_declaration("function foo( a: std_logic ) return std_logic;");
+        check_subprogram_declaration("procedure foo(a: std_logic);");
+        check_subprogram_declaration("function foo(a: std_logic) return std_logic;");
     }
 
     #[test]
     fn test_subprogram_declaration_multiple_parameters() {
         check_subprogram_declaration(
             "\
-procedure foo(
-    arg0: std_logic;
-    arg1: std_logic
-);",
+procedure foo(arg0: std_logic; arg1: std_logic);",
         );
     }
 
@@ -260,19 +259,19 @@ procedure foo(
         check_subprogram_declaration(
             "\
 procedure foo
-    generic ( x: natural );",
+    generic (x: natural);",
         );
         check_subprogram_declaration(
             "\
 procedure foo
-    generic ( x: natural )
-    parameter ( a: std_logic );",
+    generic (x: natural)
+    parameter (a: std_logic);",
         );
         check_subprogram_declaration(
             "\
 procedure foo
-    generic ( x: natural )
-    ( a: std_logic );",
+    generic (x: natural)
+    (a: std_logic);",
         );
     }
 
@@ -289,13 +288,13 @@ procedure foo
     fn test_subprogram_body() {
         check_declaration(
             "\
-function \"+\"( arg: natural ) return natural is
+function \"+\"(arg: natural) return natural is
 begin
 end function \"+\";",
         );
         check_declaration(
             "\
-function foo( arg: natural ) return natural is
+function foo(arg: natural) return natural is
 begin
 end function foo;",
         );
@@ -307,7 +306,7 @@ end function foo;",
         check_declaration("function my_func is new func;");
         check_declaration("function my_func is new func[bit return bit_vector];");
         check_declaration(
-            "function my_func is new func[bit return bit_vector] generic map ( x => x );",
+            "function my_func is new func[bit return bit_vector] generic map (x => x);",
         );
     }
 }

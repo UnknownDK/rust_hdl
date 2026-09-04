@@ -6,3 +6,4 @@ indent_width = 4
 keyword_case = "upper"
 align_declarations = true
 align_associations = true
+inline_argument_limit = 2

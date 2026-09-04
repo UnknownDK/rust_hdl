@@ -68,6 +68,10 @@ struct Args {
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     align_associations: Option<bool>,
 
+    /// Maximum list items kept inline when they fit (default: 2; 0 always expands).
+    #[arg(long)]
+    inline_argument_limit: Option<usize>,
+
     /// Explicit formatter project TOML file, instead of ancestor discovery.
     #[arg(long, conflicts_with = "no_format_config")]
     format_config: Option<PathBuf>,
@@ -174,6 +178,9 @@ fn formatter_settings(args: &Args) -> Result<(FormatConfig, VHDLStandard), CliFo
     }
     if let Some(align) = args.align_associations {
         config.align_associations = align;
+    }
+    if let Some(limit) = args.inline_argument_limit {
+        config.inline_argument_limit = limit;
     }
     if let Some(value) = &args.standard {
         standard = VHDLStandard::try_from(value.as_str()).expect("clap validates the standard");

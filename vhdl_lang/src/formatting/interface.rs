@@ -21,6 +21,18 @@ use vhdl_lang::TokenSpan;
 
 impl VHDLFormatter<'_> {
     pub(crate) fn format_interface_list(&self, clause: &InterfaceList, buffer: &mut Buffer) {
+        // A grouped declaration (`a, b, c: natural`) still declares three
+        // arguments. Preserve its token structure while counting each name.
+        let argument_count: usize = clause
+            .items
+            .iter()
+            .map(|item| match item {
+                InterfaceDeclaration::Object(object) => object.idents.len(),
+                InterfaceDeclaration::File(file) => file.idents.len(),
+                _ => 1,
+            })
+            .sum();
+        let multiline = argument_count > buffer.config().inline_argument_limit;
         let span = clause.span;
         let end_token = if self.tokens.index(span.start_token).kind == Kind::LeftPar {
             span.start_token
@@ -31,12 +43,14 @@ impl VHDLFormatter<'_> {
             self.format_token_span(TokenSpan::new(span.start_token, end_token), buffer);
             if !clause.items.is_empty() {
                 buffer.with_indent(|buffer| {
-                    if clause.items.len() == 1 {
-                        buffer.soft_line();
+                    if !multiline {
+                        buffer.soft_break(false);
                     } else {
                         buffer.line_break();
                     }
-                    let align = buffer.config().align_declarations;
+                    // Column alignment applies to structural multiline rows,
+                    // never padding multiple items sharing a physical line.
+                    let align = multiline && buffer.config().align_declarations;
                     self.format_aligned_items(
                         &clause.items,
                         buffer,
@@ -63,15 +77,17 @@ impl VHDLFormatter<'_> {
                                         item.get_end_token() + 1,
                                         buffer,
                                     );
-                                } else {
+                                } else if multiline {
                                     buffer.line_break();
+                                } else {
+                                    buffer.soft_line();
                                 }
                             }
                         },
                     );
                 });
-                if clause.items.len() == 1 {
-                    buffer.soft_line();
+                if !multiline {
+                    buffer.soft_break(false);
                 } else {
                     buffer.line_break();
                 }
@@ -89,6 +105,7 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
+        let multiline = list.items.len() > buffer.config().inline_argument_limit;
         buffer.group(|buffer| {
             self.format_token_span(
                 TokenSpan::new(span.start_token, span.start_token + 2),
@@ -96,12 +113,12 @@ impl VHDLFormatter<'_> {
             );
             if !list.items.is_empty() {
                 buffer.with_indent(|buffer| {
-                    if list.items.len() == 1 {
-                        buffer.soft_line();
-                    } else {
+                    if multiline {
                         buffer.line_break();
+                    } else {
+                        buffer.soft_break(false);
                     }
-                    let align = buffer.config().align_associations;
+                    let align = multiline && buffer.config().align_associations;
                     self.format_aligned_items(
                         &list.items,
                         buffer,
@@ -130,17 +147,19 @@ impl VHDLFormatter<'_> {
                             if i + 1 < list.items.len() {
                                 if align {
                                     self.line_break_preserve_whitespace(list.tokens[i], buffer);
-                                } else {
+                                } else if multiline {
                                     buffer.line_break();
+                                } else {
+                                    buffer.soft_line();
                                 }
                             }
                         },
                     );
                 });
-                if list.items.len() == 1 {
-                    buffer.soft_line();
-                } else {
+                if multiline {
                     buffer.line_break();
+                } else {
+                    buffer.soft_break(false);
                 }
             }
             self.format_token_id(span.end_token, buffer);
@@ -206,6 +225,9 @@ impl VHDLFormatter<'_> {
         self.format_token_id(declaration.span.start_token, buffer);
         buffer.push_whitespace();
         self.format_ident_list(&declaration.idents, buffer);
+        if buffer.config().align_declarations {
+            buffer.push_whitespace();
+        }
         self.format_token_id(declaration.colon_token, buffer);
         buffer.push_whitespace();
         self.format_subtype_indication(&declaration.subtype_indication, buffer);
@@ -273,10 +295,18 @@ impl VHDLFormatter<'_> {
     ) {
         buffer.fill_group(|buffer| {
             // [signal] my_signal :
-            self.format_token_span(
-                TokenSpan::new(object.span.start_token, object.colon_token - 1),
-                buffer,
-            );
+            let first_ident = object.idents[0].tree.token;
+            if object.span.start_token != first_ident {
+                self.format_token_span(
+                    TokenSpan::new(object.span.start_token, first_ident - 1),
+                    buffer,
+                );
+                buffer.push_whitespace();
+            }
+            self.format_ident_list(&object.idents, buffer);
+            if buffer.config().align_declarations {
+                buffer.push_whitespace();
+            }
             self.format_token_id(object.colon_token, buffer);
             buffer.with_indent(|buffer| {
                 buffer.soft_line();
@@ -451,7 +481,7 @@ mod tests {
 
     #[test]
     fn format_interface_package_declaration() {
-        check_generic("package foo is new lib.pkg generic map ( foo => bar )");
+        check_generic("package foo is new lib.pkg generic map (foo => bar)");
         check_generic("package foo is new lib.pkg generic map (<>)");
         check_generic("package foo is new lib.pkg generic map (default)");
     }

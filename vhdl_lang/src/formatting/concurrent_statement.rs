@@ -233,10 +233,13 @@ impl VHDLFormatter<'_> {
         buffer.group(|buffer| {
             self.format_expression(assert_statement.condition.as_ref(), buffer);
             if let Some(report) = &assert_statement.report {
-                buffer.soft_line();
+                buffer.line_break();
                 self.format_token_id(report.span.start_token - 1, buffer);
                 buffer.push_whitespace();
                 self.format_expression(report.as_ref(), buffer);
+            }
+            if assert_statement.severity.is_some() {
+                buffer.line_break();
             }
             self.format_opt_severity(assert_statement.severity.as_ref(), buffer);
         });
@@ -708,10 +711,10 @@ end block;",
         check_statement(
             "\
 name: block is
-    generic ( gen: integer := 1 );
-    generic map ( gen => 1 );
-    port ( prt: integer := 1 );
-    port map ( prt => 2 );
+    generic (gen: integer := 1);
+    generic map (gen => 1);
+    port (prt: integer := 1);
+    port map (prt => 2);
 begin
 end block;",
         );
@@ -763,7 +766,7 @@ end process;",
         check_statement("assert false;");
         check_statement("assert cond = true;");
         check_statement("postponed assert cond = true;");
-        check_statement("assert false report \"message\" severity error;");
+        check_statement("assert false\n    report \"message\"\n    severity error;");
     }
 
     #[test]
@@ -786,18 +789,18 @@ end process;",
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map ( const => 1 );",
+    generic map (const => 1);",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    port map ( clk => clk_foo );",
+    port map (clk => clk_foo);",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map ( const => 1 )
-    port map ( clk => clk_foo );",
+    generic map (const => 1)
+    port map (clk => clk_foo);",
         );
     }
 

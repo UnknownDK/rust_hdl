@@ -18,6 +18,7 @@ fn project_settings_parse_with_defaults_and_strict_validation() {
     assert_eq!(config.indent_width, 2);
     assert_eq!(config.keyword_case, KeywordCase::Upper);
     assert_eq!(config.max_width, 100);
+    assert_eq!(config.inline_argument_limit, 2);
     assert!(config.align_declarations && config.align_associations);
     assert_eq!(
         FormatConfig::from_toml("[libraries]").unwrap(),
@@ -33,9 +34,54 @@ fn project_settings_parse_with_defaults_and_strict_validation() {
         "[format]\nkeyword_case = 'preserve'",
         "[format]\nalign_defaults = true",
         "[format]\nalign_declarations = 'true'",
+        "[format]\ninline_argument_limit = -1",
+        "[format]\ninline_argument_limit = 10001",
+        "[format]\ninline_argument_limit = '2'",
     ] {
         assert!(FormatConfig::from_toml(bad).is_err(), "accepted {bad}");
     }
+}
+
+#[test]
+fn argument_limit_is_loaded_and_overridden_for_both_input_modes() {
+    let project = TempDir::new().unwrap();
+    fs::write(
+        project.path().join("vhdl_ls.toml"),
+        "[format]\ninline_argument_limit = 0",
+    )
+    .unwrap();
+    let input = "entity e is end; architecture rtl of e is begin foo(a, b); end;";
+    let source = project.path().join("example.vhd");
+    fs::write(&source, input).unwrap();
+    for stdin in [true, false] {
+        for limit in [None, Some("2")] {
+            let mut cmd = formatter();
+            cmd.current_dir(project.path());
+            if stdin {
+                cmd.arg("--format-stdin").write_stdin(input);
+            } else {
+                cmd.arg("--format").arg(&source);
+            }
+            if let Some(limit) = limit {
+                cmd.args(["--inline-argument-limit", limit]);
+            }
+            cmd.assert()
+                .success()
+                .stderr("")
+                .stdout(predicate::str::contains(if limit.is_some() {
+                    "foo(a, b);"
+                } else {
+                    "foo(\n        a,\n        b\n    );"
+                }));
+        }
+    }
+    formatter()
+        .args(["--format-stdin", "--inline-argument-limit", "10001"])
+        .write_stdin(input)
+        .assert()
+        .code(2)
+        .stdout("")
+        .stderr(predicate::str::contains("inline_argument_limit"));
 }
 
 #[test]

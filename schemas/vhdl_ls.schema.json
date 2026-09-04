@@ -14,7 +14,8 @@
         "indent_width": { "type": "integer", "minimum": 0, "maximum": 32, "default": 4 },
         "keyword_case": { "type": "string", "enum": ["lower", "upper"], "default": "lower" },
         "align_declarations": { "type": "boolean", "default": false },
-        "align_associations": { "type": "boolean", "default": false }
+        "align_associations": { "type": "boolean", "default": false },
+        "inline_argument_limit": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 2 }
       }
     },
     "preferred_case": {
