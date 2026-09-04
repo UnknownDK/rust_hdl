@@ -7,11 +7,11 @@ fn main() {
     for (name, input) in [
         (
             "formatter medium: std_logic_1164 body",
-            include_str!("../../vhdl_libraries/ieee2008/std_logic_1164-body.vhdl"),
+            include_str!("../tests/formatting/corpus/ieee2008/std_logic_1164-body.vhdl"),
         ),
         (
             "formatter large: numeric_std body",
-            include_str!("../../vhdl_libraries/ieee2008/numeric_std-body.vhdl"),
+            include_str!("../tests/formatting/corpus/ieee2008/numeric_std-body.vhdl"),
         ),
     ] {
         let source = Source::inline(Path::new("benchmark.vhd"), input);

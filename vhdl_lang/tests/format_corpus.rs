@@ -8,32 +8,32 @@ use vhdl_lang::{
 const CORPUS: &[(&str, &str, VHDLStandard)] = &[
     (
         "math_real.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/math_real.vhdl"),
+        include_str!("formatting/corpus/ieee2008/math_real.vhdl"),
         VHDLStandard::VHDL1993,
     ),
     (
         "math_real-body.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/math_real-body.vhdl"),
+        include_str!("formatting/corpus/ieee2008/math_real-body.vhdl"),
         VHDLStandard::VHDL1993,
     ),
     (
         "std_logic_1164.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/std_logic_1164.vhdl"),
+        include_str!("formatting/corpus/ieee2008/std_logic_1164.vhdl"),
         VHDLStandard::VHDL2008,
     ),
     (
         "std_logic_1164-body.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/std_logic_1164-body.vhdl"),
+        include_str!("formatting/corpus/ieee2008/std_logic_1164-body.vhdl"),
         VHDLStandard::VHDL2008,
     ),
     (
         "numeric_std.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/numeric_std.vhdl"),
+        include_str!("formatting/corpus/ieee2008/numeric_std.vhdl"),
         VHDLStandard::VHDL2008,
     ),
     (
         "numeric_std-body.vhdl",
-        include_str!("../../vhdl_libraries/ieee2008/numeric_std-body.vhdl"),
+        include_str!("formatting/corpus/ieee2008/numeric_std-body.vhdl"),
         VHDLStandard::VHDL2008,
     ),
 ];

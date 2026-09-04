@@ -47,6 +47,10 @@ fn is_file_excluded(path: &Path) -> bool {
 fn formats_all_vhdl_files_without_producing_different_code() -> Result<(), Box<dyn Error>> {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../example_project");
+    if !path.try_exists()? {
+        eprintln!("Optional example-project corpus is absent; the bundled IEEE corpus runs separately in format_corpus.rs");
+        return Ok(());
+    }
     let count = format_dir(&path)?;
     eprintln!("Optional example-project corpus: {count} VHDL files; the bundled IEEE corpus runs separately in format_corpus.rs");
     Ok(())

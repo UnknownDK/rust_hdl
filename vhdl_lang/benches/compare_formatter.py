@@ -1,12 +1,13 @@
 """Compare two already-built formatter CLIs without modifying source files.
 
-Run from the repository root. Use equally optimized builds for a useful ratio:
+Use equally optimized builds for a useful ratio:
 python3 vhdl_lang/benches/compare_formatter.py BASELINE_BINARY CURRENT_BINARY
 """
 
+import argparse
+from pathlib import Path
 import statistics
 import subprocess
-import sys
 import time
 
 
@@ -15,7 +16,7 @@ def measure(binary, source):
     for sample in range(12):
         start = time.perf_counter()
         subprocess.run(
-            [binary, "--format", source],
+            [binary, "--format", source, "--no-format-config"],
             stdout=subprocess.DEVNULL,
             check=True,
         )
@@ -26,9 +27,14 @@ def measure(binary, source):
 
 
 if __name__ == "__main__":
-    baseline, current = sys.argv[1:]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("baseline", type=Path)
+    parser.add_argument("current", type=Path)
+    args = parser.parse_args()
+    baseline, current = args.baseline.resolve(strict=True), args.current.resolve(strict=True)
+    corpus = Path(__file__).resolve().parent.parent / "tests/formatting/corpus/ieee2008"
     for name in ["std_logic_1164-body.vhdl", "numeric_std-body.vhdl"]:
-        source = "vhdl_libraries/ieee2008/" + name
+        source = corpus / name
         before, after = measure(baseline, source), measure(current, source)
         print(f"{name}: baseline {before:.2f} ms; current {after:.2f} ms; "
               f"change {(after / before - 1) * 100:+.1f}%")
