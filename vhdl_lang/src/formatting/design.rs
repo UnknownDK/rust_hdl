@@ -134,10 +134,7 @@ end package;",
         check_package_formatted(
             "\
 package pkg_name is
-    generic (
-        type foo;
-        type bar
-    );
+    generic (type foo; type bar);
 end package;",
         );
     }
@@ -147,10 +144,7 @@ end package;",
         check_package_formatted(
             "\
 package pkg_name is
-    generic (
-        type foo;
-        type bar
-    );
+    generic (type foo; type bar);
 end package;",
         );
     }

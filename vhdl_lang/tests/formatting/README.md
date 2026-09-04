@@ -6,14 +6,26 @@ sink. There is no captured child-buffer rendering. Text, hard lines, soft lines,
 empty-or-newline breaks, indentation, groups and concatenations compose before
 the final render.
 
-Delimiter groups flatten if they fit, otherwise each list item gets its own
-line. Nested groups choose independently. Statement continuation groups decide
+Argument lists flatten only when they fit and their count is at most
+`inline_argument_limit` (default 2). Above that count, each list item gets its own
+line even at wide line widths. The rule covers calls/indexed names, subprogram
+parameters, generic/port maps and generic/port interfaces. Grouped names in an
+interface declaration count individually without changing the grouping's tokens.
+Empty lists remain compact; zero forces all nonempty lists to expand. Slices,
+aggregates, sensitivity lists and ordinary parenthesized expressions keep their
+existing width-aware rules. Nested groups choose independently. Statement continuation groups decide
 their spaces/breaks locally, so an assignment prefix can remain beside a call
 whose arguments wrap. Expressions inherit the indentation of the physical line
 where they start; their closing delimiters return to that level. Multi-item
-port/generic maps and interface lists remain one item per line. Binary operators
+port/generic maps and interface lists follow the shared argument limit. Binary operators
 lead continuation lines; the left spine of a binary-expression tree does not
 produce increasing indentation. Existing parentheses are retained.
+
+Function headers use local continuation decisions so an expanded parameter list
+does not force `return` onto a new line after `)`. The return type and `is` remain
+beside `)` when they fit. Assertions always put `report` and `severity` on separate
+continuation lines; an assertion with neither clause stays compact. Standalone
+report statements retain their existing width-aware behavior.
 
 Width summaries are cached during document construction. The renderer uses an
 explicit stack and bounded lookahead through cached summaries, rather than
@@ -27,6 +39,9 @@ Original spaces within comment text and disabled regions remain untouched.
 colons in object/file declarations, interfaces and record fields; the latter
 aligns named port/generic map arrows. It does not align modes, types, default
 expressions, assignments, ordinary calls or aggregates.
+Inline lists do not receive alignment padding. In interfaces and maps, column
+alignment applies to lists expanded by the argument limit; short lists that wrap
+only for width/comments retain ordinary spacing.
 
 Rows carry an `Align` document primitive, not literal spaces in token text.
 Adjacent single-line rows are measured using document width summaries. The
@@ -54,6 +69,7 @@ defaults and CLI flags override those settings. The top-level `standard` selects
 the parser version, overridden by `--standard`.
 
 `--format-config` explicitly selects a file; `--no-format-config` skips discovery.
+`inline_argument_limit` and `--inline-argument-limit` accept 0–10000.
 Use `--align-declarations=false` or `--align-associations=false` to override a
 project's enabled alignment. Invalid configuration fails with exit code 2 and
 no stdout. `[format]` rejects unknown keys. The formatter loader does not require
@@ -92,6 +108,10 @@ reports, waits, returns, VHDL-2019 views, comment break points, Unicode, both
 keyword cases and lossless disabled sections. Its deterministic generative tests
 vary whitespace in valid token streams and insert comments at every token gap.
 Renderer unit tests include deeply nested groups and suffix-width accounting.
+`format_arguments.rs` checks the shared threshold across constructs, exact
+function/assert layouts, grouped declarations, nested calls/indexing, comments,
+width fallback and idempotency. Configuration tests cover TOML loading and CLI
+overrides for the threshold in both file and stdin modes.
 
 `format_corpus.rs` uses six version-controlled IEEE sources, each carrying an
 Apache-2.0 notice under `vhdl_libraries/ieee2008`:

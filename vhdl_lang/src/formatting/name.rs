@@ -58,6 +58,7 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
+        let multiline = call.parameters.items.len() > buffer.config().inline_argument_limit;
         buffer.expression_group(|buffer| {
             self.format_name(call.name.as_ref(), buffer);
             let open_paren = call.name.span.end_token + 1;
@@ -66,18 +67,30 @@ impl VHDLFormatter<'_> {
             }
             buffer.with_indent(|buffer| {
                 if !call.parameters.items.is_empty() {
-                    buffer.soft_break(false);
+                    if multiline {
+                        buffer.line_break();
+                    } else {
+                        buffer.soft_break(false);
+                    }
                 }
                 for (i, parameter) in call.parameters.items.iter().enumerate() {
                     self.format_association_element(parameter, buffer);
                     if let Some(token) = call.parameters.tokens.get(i) {
                         self.format_token_id(*token, buffer);
-                        buffer.soft_line();
+                        if multiline {
+                            buffer.line_break();
+                        } else {
+                            buffer.soft_line();
+                        }
                     }
                 }
             });
             if !call.parameters.items.is_empty() {
-                buffer.soft_break(false);
+                if multiline {
+                    buffer.line_break();
+                } else {
+                    buffer.soft_break(false);
+                }
             }
             let close_paren = span.end_token;
             if self.tokens.index(close_paren).kind == Kind::RightPar {

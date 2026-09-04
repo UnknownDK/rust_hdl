@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 
 const INPUT: &str = "entity foo is\nport(\na:in std_logic\n);\nend entity;";
 const OTHER_INPUT: &str = "entity bar is\nend entity;";
-const EXPECTED: &str = "entity foo is\n    port ( a: in std_logic );\nend entity;\n";
+const EXPECTED: &str = "entity foo is\n    port (a: in std_logic);\nend entity;\n";
 
 fn formatter() -> Command {
     cargo_bin_cmd!("vhdl_lang")
@@ -110,7 +110,7 @@ fn exposes_keyword_case_width_and_indentation() {
         .write_stdin("entity Foo is port(a: in bit); end;")
         .assert()
         .success()
-        .stdout("ENTITY Foo IS\n  PORT ( a: IN bit );\nEND;\n")
+        .stdout("ENTITY Foo IS\n  PORT (a: IN bit);\nEND;\n")
         .stderr("");
 }
 

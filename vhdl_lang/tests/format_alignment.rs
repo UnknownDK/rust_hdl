@@ -65,6 +65,7 @@ fn alignment_switches_are_independent() {
         input,
         FormatConfig {
             align_associations: true,
+            inline_argument_limit: 0,
             ..FormatConfig::default()
         },
     );
@@ -167,7 +168,13 @@ fn comments_and_disabled_text_remain_exact() {
 #[test]
 fn record_fields_and_generic_maps_have_independent_groups() {
     let input = "entity e is generic(size: natural := 8; enable: boolean := true); end; architecture rtl of e is type payload_t is record valid: boolean; data_word: bit_vector(0 to 7);\n\nx: bit; yy: bit; end record; begin u: entity work.e generic map(size => 8, enable => true) port map(a => a, longer_name => open); end;";
-    let output = checked(input, aligned());
+    let output = checked(
+        input,
+        FormatConfig {
+            inline_argument_limit: 0,
+            ..aligned()
+        },
+    );
     assert!(output.contains("size   : natural := 8;"), "{output}");
     assert!(output.contains("valid     : boolean;"), "{output}");
     assert!(output.contains("x  : bit;"), "{output}");

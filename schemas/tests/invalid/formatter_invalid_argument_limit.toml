@@ -1,0 +1,4 @@
+[libraries]
+
+[format]
+inline_argument_limit = -1

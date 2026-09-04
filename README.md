@@ -254,6 +254,7 @@ indent_width = 4
 keyword_case = "lower"
 align_declarations = true
 align_associations = true
+inline_argument_limit = 2
 ```
 
 The formatter uses the nearest `vhdl_ls.toml` in the input file's directory or
@@ -271,9 +272,36 @@ default to false. Width must be 1–10000, indentation 0–32 spaces. Unknown op
 in `[format]`, invalid values, and unreadable selected configuration files are
 errors reported on stderr without formatted output.
 
+`inline_argument_limit` is shared by calls, function/procedure parameters,
+generic/port maps, and generic/port interface lists. By default, up to two
+arguments stay on one line **if they fit**; three or more expand. Use `0` to
+always expand nonempty lists, or a larger value to allow more inline arguments.
+Override it with `--inline-argument-limit N` (0–10000). Width and comments can
+still force shorter lists to wrap. Grouped parameter names count individually,
+but their existing declaration grouping is retained. Because calls and indexing
+are syntactically ambiguous, indexed names use the same count rule; slices and
+ordinary parenthesized expressions are unaffected.
+
+Expanded function headers keep `) return ... is` together when it fits.
+Assert `report` and `severity` clauses always start on their own indented lines,
+independently of the argument limit:
+
+```vhdl
+file_open(
+    foo,
+    bar,
+    read_mode
+);
+assert false
+    report "Unsupported bla bla"
+    severity failure;
+```
+
 Colons align in adjacent object/file declarations, interfaces and record fields.
 Arrows align in named port/generic map associations; calls and aggregates retain
-ordinary spacing. Blank lines, standalone comments and other item kinds separate
+ordinary spacing. Inline lists never receive column padding; interface/map
+alignment applies when the argument count exceeds the inline limit.
+Blank lines, standalone comments and other item kinds separate
 groups. Rows with internal/trailing comments or wrapped content do not contribute
 padding. Alignment falls back to ordinary spacing if the combined columns would
 exceed the configured width. Modes, types, defaults and assignments are not
