@@ -44,8 +44,14 @@ impl VHDLFormatter<'_> {
         buffer.line_break();
         for (i, item) in statements.iter().enumerate() {
             self.format_labeled_concurrent_statement(item, buffer);
-            if i < statements.len() - 1 {
-                self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+            if let Some(next) = statements.get(i + 1) {
+                if matches!(item.statement.item, ConcurrentStatement::Process(_))
+                    || matches!(next.statement.item, ConcurrentStatement::Process(_))
+                {
+                    buffer.blank_line();
+                } else {
+                    self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+                }
             }
         }
     }
@@ -417,14 +423,23 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
+        let multiline = self.expand_named_aggregate(associations, buffer);
         buffer.expression_group(|buffer| {
             // (
             self.format_token_id(span.start_token, buffer);
             buffer.with_indent(|buffer| {
-                buffer.soft_break(false);
+                if multiline {
+                    buffer.line_break();
+                } else {
+                    buffer.soft_break(false);
+                }
                 self.format_element_associations(associations, buffer);
             });
-            buffer.soft_break(false);
+            if multiline {
+                buffer.line_break();
+            } else {
+                buffer.soft_break(false);
+            }
             // )
             self.format_token_id(span.end_token, buffer);
         });

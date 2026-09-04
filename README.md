@@ -40,8 +40,8 @@ operators such as `and` and `not`; identifiers, quoted operator symbols and
 literals are unaffected. Width counts Unicode scalar values. Unbreakable tokens,
 preserved comments and disabled regions may exceed the preferred width.
 
-To enable selective alignment (declaration colons and map arrows, but not
-default values), add this section to your project's `vhdl_ls.toml`:
+To enable selective alignment (declaration colons and map/aggregate arrows, but
+not default values), add this section to your project's `vhdl_ls.toml`:
 
 ```toml
 [format]
@@ -69,14 +69,21 @@ in `[format]`, invalid values, and unreadable selected configuration files are
 errors reported on stderr without formatted output.
 
 `inline_argument_limit` is shared by calls, function/procedure parameters,
-generic/port maps, and generic/port interface lists. By default, up to two
-arguments stay on one line **if they fit**; three or more expand. Use `0` to
+generic/port maps, generic/port interface lists, and aggregates containing named
+associations. By default, up to two arguments stay on one line **if they fit**;
+three or more expand. Use `0` to
 always expand nonempty lists, or a larger value to allow more inline arguments.
 Override it with `--inline-argument-limit N` (0–10000). Width and comments can
 still force shorter lists to wrap. Grouped parameter names count individually,
 but their existing declaration grouping is retained. Because calls and indexing
 are syntactically ambiguous, indexed names use the same count rule; slices and
 ordinary parenthesized expressions are unaffected.
+
+Named aggregates use the same limit, counting each association once (including
+positional entries in a mixed aggregate). Purely positional aggregates remain
+width-driven. At the default limit, `(others => '0')` stays compact; `0` expands
+even single-association named aggregates. Nested aggregates choose their layouts
+independently.
 
 Expanded function headers keep `) return ... is` together when it fits.
 Assert `report` and `severity` clauses always start on their own indented lines,
@@ -94,14 +101,39 @@ assert false
 ```
 
 Colons align in adjacent object/file declarations, interfaces and record fields.
-Arrows align in named port/generic map associations; calls and aggregates retain
-ordinary spacing. Inline lists never receive column padding; interface/map
-alignment applies when the argument count exceeds the inline limit.
+Arrows align in named port/generic map and aggregate associations; ordinary calls
+retain their spacing. Inline lists never receive column padding; alignment in
+interfaces, maps and aggregates applies when the item count exceeds the inline limit.
 Blank lines, standalone comments and other item kinds separate
 groups. Rows with internal/trailing comments or wrapped content do not contribute
 padding. Alignment falls back to ordinary spacing if the combined columns would
 exceed the configured width. Modes, types, defaults and assignments are not
 separately aligned.
+
+Expressions prefer breaks between logical operands over breaks inside their
+comparisons, and between arithmetic terms over breaks inside their products.
+Expanded `if`/`elsif` headers put `then` on its own line; short headers stay inline.
+Operators lead continuation lines, with parentheses and token order preserved:
+
+```vhdl
+if input_valid = '1'
+    and output_ready = '1'
+    and transfer_enabled = '1'
+then
+    header <= (
+        valid  => '1',
+        opcode => OP_WRITE,
+        length => payload_length
+    );
+end if;
+```
+
+The example assumes the condition needs wrapping and association alignment is
+enabled. Comparisons can still wrap if they cannot fit by themselves.
+One blank line separates context clauses from their design unit, processes from
+neighboring concurrent statements, and subprogram bodies from neighboring
+declarations. Existing declaration groups are retained and extra blank lines
+are collapsed. Leading comments remain attached to the following block.
 
 Use `format_source` for the default library API, or
 `format_source_with_config(&parser, &source, &FormatConfig { ... })` to configure

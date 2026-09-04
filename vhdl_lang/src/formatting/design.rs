@@ -7,7 +7,6 @@
 
 use crate::ast::{AnyDesignUnit, AnyPrimaryUnit, AnySecondaryUnit, PackageBody};
 use crate::formatting::buffer::Buffer;
-use crate::HasTokenSpan;
 use vhdl_lang::ast::PackageDeclaration;
 use vhdl_lang::formatting::VHDLFormatter;
 use vhdl_lang::{indented, TokenSpan};
@@ -46,10 +45,7 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_package(&self, package: &PackageDeclaration, buffer: &mut Buffer) {
-        self.format_context_clause(&package.context_clause, buffer);
-        if let Some(item) = package.context_clause.last() {
-            self.line_break_preserve_whitespace(item.span().end_token, buffer);
-        }
+        self.format_design_context(&package.context_clause, buffer);
         // package <ident> is
         self.format_token_span(
             TokenSpan::new(package.span.start_token, package.span.start_token + 2),
@@ -71,10 +67,7 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_package_body(&self, body: &PackageBody, buffer: &mut Buffer) {
-        self.format_context_clause(&body.context_clause, buffer);
-        if let Some(item) = body.context_clause.last() {
-            self.line_break_preserve_whitespace(item.span().end_token, buffer);
-        }
+        self.format_design_context(&body.context_clause, buffer);
         // package body <ident> is
         self.format_token_span(
             TokenSpan::new(body.span.start_token, body.span.start_token + 3),
@@ -206,29 +199,21 @@ end context;",
     }
 
     #[test]
-    fn design_unit_context_clause_preserve_whitespaces() {
-        check_design_unit_formatted(
-            "\
-library lib;
-use lib.foo.all;
-
-package pkg_name is
-end package;",
-        );
-        check_design_unit_formatted(
-            "\
-library lib;
-use lib.foo.all;
-package pkg_name is
-end package;",
-        );
-        check_design_unit_formatted(
-            "\
-library lib;
-use lib.foo.all;
-package pkg_name is
-end package;",
-        );
+    fn design_unit_context_clause_has_one_blank_line() {
+        let expected = "library lib;\nuse lib.foo.all;\n\npackage pkg_name is\nend package;";
+        for separator in ["\n", "\n\n", "\n\n\n\n"] {
+            let input = format!(
+                "library lib;\nuse lib.foo.all;{separator}package pkg_name is\nend package;"
+            );
+            check_formatted(
+                &input,
+                expected,
+                Code::design_file,
+                |formatter, file, buffer| {
+                    formatter.format_any_design_unit(&file.design_units[0].1, buffer, true)
+                },
+            );
+        }
     }
 
     #[test]

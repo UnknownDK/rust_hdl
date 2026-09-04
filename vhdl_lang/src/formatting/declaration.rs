@@ -49,8 +49,14 @@ impl VHDLFormatter<'_> {
             |item| item.span,
             |i, item, buffer| {
                 self.format_declaration(item, buffer);
-                if i < declarations.len() - 1 {
-                    self.line_break_preserve_whitespace(item.get_end_token(), buffer);
+                if let Some(next) = declarations.get(i + 1) {
+                    if matches!(item.item, Declaration::SubprogramBody(_))
+                        || matches!(next.item, Declaration::SubprogramBody(_))
+                    {
+                        buffer.blank_line();
+                    } else {
+                        self.line_break_preserve_whitespace(item.get_end_token(), buffer);
+                    }
                 }
             },
         );
@@ -577,7 +583,7 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_package_instance(&self, instance: &PackageInstantiation, buffer: &mut Buffer) {
-        self.format_context_clause(&instance.context_clause, buffer);
+        self.format_design_context(&instance.context_clause, buffer);
         // package <name> is new
         self.format_token_span(
             TokenSpan::new(instance.get_start_token(), instance.get_start_token() + 3),
@@ -782,6 +788,7 @@ end protected body;",
             "\
 type foo is protected body
     variable foo: natural;
+
     procedure proc is
     begin
     end;

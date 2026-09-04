@@ -48,4 +48,13 @@ impl VHDLFormatter<'_> {
             }
         }
     }
+
+    /// Context items remain a group, separated from the following design unit.
+    /// Context declarations use `format_context_clause` directly for their body.
+    pub(crate) fn format_design_context(&self, clause: &ContextClause, buffer: &mut Buffer) {
+        self.format_context_clause(clause, buffer);
+        if !clause.is_empty() {
+            buffer.blank_line();
+        }
+    }
 }

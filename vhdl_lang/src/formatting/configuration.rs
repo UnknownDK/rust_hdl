@@ -11,7 +11,7 @@ use crate::ast::{
 };
 use crate::formatting::buffer::Buffer;
 use crate::syntax::Kind;
-use crate::{indented, HasTokenSpan, TokenAccess, TokenSpan, VHDLFormatter};
+use crate::{indented, TokenAccess, TokenSpan, VHDLFormatter};
 use vhdl_lang::ast::{ComponentConfiguration, InstantiationList};
 
 impl VHDLFormatter<'_> {
@@ -20,10 +20,7 @@ impl VHDLFormatter<'_> {
         configuration: &ConfigurationDeclaration,
         buffer: &mut Buffer,
     ) {
-        self.format_context_clause(&configuration.context_clause, buffer);
-        if let Some(item) = configuration.context_clause.last() {
-            self.line_break_preserve_whitespace(item.span().end_token, buffer);
-        }
+        self.format_design_context(&configuration.context_clause, buffer);
         // configuration cfg of entity_name is
         self.format_token_span(
             TokenSpan::new(

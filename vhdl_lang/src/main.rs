@@ -87,11 +87,11 @@ struct Args {
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     align_declarations: Option<bool>,
 
-    /// Align named port/generic map arrows (pass false to override project settings).
+    /// Align named map/aggregate arrows (pass false to override project settings).
     #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
     align_associations: Option<bool>,
 
-    /// Maximum list items kept inline when they fit (default: 2; 0 always expands).
+    /// Inline limit for calls, interfaces, maps and named aggregates (default: 2; 0 expands).
     #[arg(long)]
     inline_argument_limit: Option<usize>,
 
