@@ -35,6 +35,8 @@ enum Kind {
     Text(String, Option<usize>),
     HardLine,
     Space,
+    /// Lazy inter-token padding, resolved while composing an alignment run.
+    Align(usize),
     SoftLine(bool),
     Indent(usize, Box<Doc>),
     Group {
@@ -76,6 +78,75 @@ impl Doc {
     pub(crate) fn space() -> Self {
         let prefix = Prefix::new(1, false);
         Self::leaf(Kind::Space, prefix, prefix)
+    }
+
+    pub(crate) fn align() -> Self {
+        let prefix = Prefix::new(1, false);
+        Self::leaf(Kind::Align(1), prefix, prefix)
+    }
+
+    pub(crate) fn is_space(&self) -> bool {
+        matches!(self.kind, Kind::Space)
+    }
+
+    /// Only single-line rows participate. Widths are measured from documents,
+    /// not source spacing or pre-rendered child buffers.
+    pub(crate) fn alignment_widths(&self) -> Option<(usize, usize)> {
+        if self.flat.ends_line() {
+            return None;
+        }
+        self.alignment_column()
+            .map(|left| (left, self.flat.width() - left))
+    }
+
+    fn alignment_column(&self) -> Option<usize> {
+        match &self.kind {
+            Kind::Align(_) => Some(0),
+            Kind::Indent(_, child) => child.alignment_column(),
+            Kind::Group { children, .. } | Kind::Concat(children) => {
+                let mut width = 0usize;
+                for child in children {
+                    if let Some(column) = child.alignment_column() {
+                        return Some(width + column);
+                    }
+                    width += child.flat.width();
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn pad_alignment(&mut self, extra: usize) -> bool {
+        let changed = match &mut self.kind {
+            Kind::Align(width) => {
+                *width += extra;
+                true
+            }
+            Kind::Indent(_, child) => child.pad_alignment(extra),
+            Kind::Group { children, .. } | Kind::Concat(children) => {
+                children.iter_mut().any(|child| child.pad_alignment(extra))
+            }
+            _ => false,
+        };
+        if changed {
+            match &self.kind {
+                Kind::Align(width) => {
+                    self.flat = Prefix::new(*width, false);
+                    self.broken = self.flat;
+                }
+                Kind::Indent(_, child) => {
+                    self.flat = child.flat;
+                    self.broken = child.broken;
+                }
+                Kind::Group { children, .. } | Kind::Concat(children) => {
+                    self.flat = Self::summarize(children, true);
+                    self.broken = Self::summarize(children, false);
+                }
+                _ => unreachable!(),
+            }
+        }
+        changed
     }
 
     /// A line break that flattens to a space (`space = true`) or nothing.
@@ -140,27 +211,28 @@ impl Doc {
 
     pub(crate) fn concat(docs: impl IntoIterator<Item = Doc>) -> Self {
         let docs: Vec<_> = docs.into_iter().collect();
-        let summarize = |flat: bool| {
-            let mut prefix = Prefix::new(0usize, false);
-            for doc in &docs {
-                let next = if flat { doc.flat } else { doc.broken };
-                prefix = Prefix::new(
-                    prefix.width().saturating_add(next.width()),
-                    next.ends_line(),
-                );
-                if next.ends_line() {
-                    break;
-                }
-            }
-            prefix
-        };
-        let flat = summarize(true);
-        let broken = summarize(false);
+        let flat = Self::summarize(&docs, true);
+        let broken = Self::summarize(&docs, false);
         Self {
             kind: Kind::Concat(docs),
             flat,
             broken,
         }
+    }
+
+    fn summarize(docs: &[Doc], flat: bool) -> Prefix {
+        let mut prefix = Prefix::new(0usize, false);
+        for doc in docs {
+            let next = if flat { doc.flat } else { doc.broken };
+            prefix = Prefix::new(
+                prefix.width().saturating_add(next.width()),
+                next.ends_line(),
+            );
+            if next.ends_line() {
+                break;
+            }
+        }
+        prefix
     }
 }
 
@@ -180,7 +252,7 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
     let mut output = String::new();
     let mut column = 0usize;
     let mut line_indent = 0usize;
-    let mut space = false;
+    let mut space = 0usize;
     let mut stack: Vec<_> = docs
         .iter()
         .rev()
@@ -198,11 +270,11 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                     let padding = indent.saturating_mul(indent_width);
                     output.extend(std::iter::repeat_n(' ', padding));
                     column = padding;
-                } else if space {
-                    output.push(' ');
-                    column += 1;
+                } else if space > 0 {
+                    output.extend(std::iter::repeat_n(' ', space));
+                    column += space;
                 }
-                space = false;
+                space = 0;
                 output.push_str(text);
                 column = if let Some((_, last)) = text.rsplit_once('\n') {
                     last.chars().count()
@@ -210,8 +282,11 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                     column + text.chars().count()
                 };
             }
-            Kind::Space => space = column != 0,
-            Kind::SoftLine(true) if matches!(mode, Mode::Flat) => space = column != 0,
+            Kind::Space => space = space.max(usize::from(column != 0)),
+            Kind::Align(width) => space = space.max(if column == 0 { 0 } else { *width }),
+            Kind::SoftLine(true) if matches!(mode, Mode::Flat) => {
+                space = space.max(usize::from(column != 0))
+            }
             Kind::SoftLine(false) if matches!(mode, Mode::Flat) => {}
             Kind::SoftLine(flat_space) if matches!(mode, Mode::Fill) => {
                 let mut width = column.saturating_add(usize::from(*flat_space));
@@ -231,17 +306,17 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                     }
                 }
                 if fits {
-                    space |= *flat_space && column != 0;
+                    space = space.max(usize::from(*flat_space && column != 0));
                 } else {
                     output.push('\n');
                     column = 0;
-                    space = false;
+                    space = 0;
                 }
             }
             Kind::HardLine | Kind::SoftLine(_) => {
                 output.push('\n');
                 column = 0;
-                space = false;
+                space = 0;
             }
             Kind::Indent(level, child) => stack.push((
                 child,
@@ -279,7 +354,7 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                 let start = if column == 0 {
                     indent.saturating_mul(indent_width)
                 } else {
-                    column + usize::from(space)
+                    column + space
                 };
                 let measure = doc.flat;
                 let mut width = start.saturating_add(measure.width());

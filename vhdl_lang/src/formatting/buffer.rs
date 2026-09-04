@@ -10,7 +10,7 @@ use super::{
     FormatConfig, KeywordCase,
 };
 use crate::syntax::{Comment, Value};
-use crate::{kind_str, Token};
+use crate::{kind_str, Token, TokenId};
 use std::cell::OnceCell;
 
 /// Builds a nested document from tokens, comments and structural whitespace.
@@ -23,6 +23,7 @@ pub struct Buffer {
     line_start: bool,
     group_starts: Vec<usize>,
     config: FormatConfig,
+    alignment_token: Option<TokenId>,
     /// Number of line breaks to emit before the next content.
     pending_line_breaks: usize,
     /// insert an extra newline before pushing a token.
@@ -46,6 +47,7 @@ impl Buffer {
             line_start: true,
             group_starts: Vec::new(),
             config,
+            alignment_token: None,
             pending_line_breaks: 0,
             insert_extra_newline: false,
             indentation: 0,
@@ -86,6 +88,62 @@ impl From<Buffer> for String {
 }
 
 impl Buffer {
+    pub(crate) fn config(&self) -> FormatConfig {
+        self.config
+    }
+
+    pub(crate) fn align_before(&mut self, id: TokenId) {
+        if self.alignment_token == Some(id) {
+            self.alignment_token = None;
+            if self.docs.last().is_some_and(Doc::is_space) {
+                self.docs.pop();
+            }
+            self.push_doc(Doc::align());
+        }
+    }
+
+    /// Build one alignment row, keeping leading comments outside its document.
+    pub(crate) fn alignment_row(&mut self, token: TokenId, build: impl FnOnce(&mut Self)) -> usize {
+        self.prepare_content();
+        self.group_starts.push(self.docs.len());
+        let previous = self.alignment_token.replace(token);
+        build(self);
+        self.alignment_token = previous;
+        let start = self.group_starts.pop().expect("balanced alignment rows");
+        let docs = self.docs.split_off(start);
+        self.push_doc(Doc::concat(docs));
+        start
+    }
+
+    pub(crate) fn align_rows(&mut self, rows: &[usize]) {
+        let available = self
+            .config
+            .max_width
+            .saturating_sub(self.indentation.saturating_mul(self.config.indent_width));
+        let mut run = Vec::new();
+        for &index in rows {
+            match self.docs[index].alignment_widths() {
+                Some((left, right)) if left + right <= available => run.push((index, left, right)),
+                _ => {
+                    self.align_run(&run, available);
+                    run.clear();
+                }
+            }
+        }
+        self.align_run(&run, available);
+    }
+
+    fn align_run(&mut self, run: &[(usize, usize, usize)], available: usize) {
+        let left = run.iter().map(|row| row.1).max().unwrap_or(0);
+        let right = run.iter().map(|row| row.2).max().unwrap_or(0);
+        if left + right <= available {
+            for &(index, width, _) in run {
+                self.docs[index].pad_alignment(left - width);
+            }
+            self.rendered.take();
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         self.rendered.get_or_init(|| {
             layout::render_docs(&self.docs, self.config.indent_width, self.config.max_width)

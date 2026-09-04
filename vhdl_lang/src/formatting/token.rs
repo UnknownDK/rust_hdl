@@ -14,6 +14,7 @@ use vhdl_lang::TokenSpan;
 
 impl VHDLFormatter<'_> {
     pub(crate) fn format_token_id(&self, id: TokenId, buffer: &mut Buffer) {
+        buffer.align_before(id);
         buffer.push_token(self.tokens.index(id));
     }
 

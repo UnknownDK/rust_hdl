@@ -36,13 +36,39 @@ impl VHDLFormatter<'_> {
                     } else {
                         buffer.line_break();
                     }
-                    for (i, item) in clause.items.iter().enumerate() {
-                        self.format_interface_declaration(item, buffer);
-                        if i < clause.items.len() - 1 {
-                            self.format_token_id(item.get_end_token() + 1, buffer);
-                            buffer.line_break();
-                        }
-                    }
+                    let align = buffer.config().align_declarations;
+                    self.format_aligned_items(
+                        &clause.items,
+                        buffer,
+                        |item| {
+                            if align {
+                                match item {
+                                    InterfaceDeclaration::Object(object) => {
+                                        Some(object.colon_token)
+                                    }
+                                    InterfaceDeclaration::File(file) => Some(file.colon_token),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            }
+                        },
+                        |item| item.span(),
+                        |i, item, buffer| {
+                            self.format_interface_declaration(item, buffer);
+                            if i < clause.items.len() - 1 {
+                                self.format_token_id(item.get_end_token() + 1, buffer);
+                                if align {
+                                    self.line_break_preserve_whitespace(
+                                        item.get_end_token() + 1,
+                                        buffer,
+                                    );
+                                } else {
+                                    buffer.line_break();
+                                }
+                            }
+                        },
+                    );
                 });
                 if clause.items.len() == 1 {
                     buffer.soft_line();
@@ -75,15 +101,41 @@ impl VHDLFormatter<'_> {
                     } else {
                         buffer.line_break();
                     }
-                    for (i, item) in list.items.iter().enumerate() {
-                        self.format_association_element(item, buffer);
-                        if let Some(token) = list.tokens.get(i) {
-                            self.format_token_id(*token, buffer);
-                        }
-                        if i + 1 < list.items.len() {
-                            buffer.line_break();
-                        }
-                    }
+                    let align = buffer.config().align_associations;
+                    self.format_aligned_items(
+                        &list.items,
+                        buffer,
+                        |item| {
+                            if align {
+                                item.formal.as_ref().map(|formal| formal.span.end_token + 1)
+                            } else {
+                                None
+                            }
+                        },
+                        |item| {
+                            TokenSpan::new(
+                                item.formal
+                                    .as_ref()
+                                    .map_or(item.actual.span.start_token, |formal| {
+                                        formal.span.start_token
+                                    }),
+                                item.actual.span.end_token,
+                            )
+                        },
+                        |i, item, buffer| {
+                            self.format_association_element(item, buffer);
+                            if let Some(token) = list.tokens.get(i) {
+                                self.format_token_id(*token, buffer);
+                            }
+                            if i + 1 < list.items.len() {
+                                if align {
+                                    self.line_break_preserve_whitespace(list.tokens[i], buffer);
+                                } else {
+                                    buffer.line_break();
+                                }
+                            }
+                        },
+                    );
                 });
                 if list.items.len() == 1 {
                     buffer.soft_line();

@@ -11,6 +11,7 @@ use crate::syntax::Kind;
 use crate::{Token, TokenAccess};
 use vhdl_lang::ast::HasIdent;
 
+mod alignment;
 mod api;
 mod architecture;
 mod buffer;

@@ -44,21 +44,41 @@ struct Args {
     #[arg(short = 'l', long)]
     libraries: Option<String>,
 
-    /// Optional source path metadata for diagnostics in --format-stdin mode.
+    /// Source path for diagnostics and project configuration discovery in stdin mode.
     #[arg(long, requires = "format_stdin")]
     stdin_filepath: Option<PathBuf>,
 
     /// Preferred formatter line width (unbreakable text may exceed this).
-    #[arg(long, default_value_t = 100)]
-    max_width: usize,
+    #[arg(long)]
+    max_width: Option<usize>,
 
     /// Spaces per formatter indentation level.
-    #[arg(long, default_value_t = 4)]
-    indent_width: usize,
+    #[arg(long)]
+    indent_width: Option<usize>,
 
     /// Case of reserved words; identifiers, literals and comments are unchanged.
-    #[arg(long, value_enum, default_value_t = KeywordCase::Lower)]
-    keyword_case: KeywordCase,
+    #[arg(long, value_enum)]
+    keyword_case: Option<KeywordCase>,
+
+    /// Align declaration colons (pass false to override project settings).
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+    align_declarations: Option<bool>,
+
+    /// Align named port/generic map arrows (pass false to override project settings).
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+    align_associations: Option<bool>,
+
+    /// Explicit formatter project TOML file, instead of ancestor discovery.
+    #[arg(long, conflicts_with = "no_format_config")]
+    format_config: Option<PathBuf>,
+
+    /// Ignore project formatter configuration and use defaults plus CLI overrides.
+    #[arg(long)]
+    no_format_config: bool,
+
+    /// VHDL standard used by the formatter (default: 2008).
+    #[arg(long, value_parser = ["1993", "2008", "2019"])]
+    standard: Option<String>,
 
     #[clap(flatten)]
     group: Group,
@@ -66,18 +86,100 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-    let format_config = FormatConfig {
-        max_width: args.max_width,
-        indent_width: args.indent_width,
-        keyword_case: args.keyword_case,
-    };
-    if let Some(config_path) = args.group.config {
-        parse_and_analyze_project(&config_path, args.num_threads, args.libraries.as_ref());
-    } else if let Some(format) = args.group.format {
-        run_formatter(format_file(&format, &format_config));
-    } else if args.group.format_stdin {
-        run_formatter(format_stdin(args.stdin_filepath.as_deref(), &format_config));
+    if let Some(config_path) = &args.group.config {
+        parse_and_analyze_project(config_path, args.num_threads, args.libraries.as_ref());
+    } else {
+        run_formatter((|| {
+            let (config, standard) = formatter_settings(&args)?;
+            if let Some(path) = &args.group.format {
+                format_file(path, &config, standard)
+            } else {
+                format_stdin(args.stdin_filepath.as_deref(), &config, standard)
+            }
+        })());
     }
+}
+
+fn formatter_settings(args: &Args) -> Result<(FormatConfig, VHDLStandard), CliFormatError> {
+    let path = if args.no_format_config {
+        None
+    } else if let Some(path) = &args.format_config {
+        Some(path.clone())
+    } else {
+        let cwd = std::env::current_dir()?;
+        let source = args.group.format.as_ref().or(args.stdin_filepath.as_ref());
+        // Normalize lexical `..` even for buffers whose file does not exist yet.
+        let source = source.map(|source| {
+            let mut path = PathBuf::new();
+            for component in cwd.join(source).components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        path.pop();
+                    }
+                    std::path::Component::CurDir => {}
+                    component => path.push(component.as_os_str()),
+                }
+            }
+            path
+        });
+        let directory = source.as_deref().and_then(Path::parent).unwrap_or(&cwd);
+        let mut found = None;
+        for ancestor in directory.ancestors() {
+            let candidate = ancestor.join("vhdl_ls.toml");
+            match std::fs::metadata(&candidate) {
+                Ok(_) => {
+                    found = Some(candidate);
+                    break;
+                }
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(CliFormatError::Config(format!(
+                        "{}: {err}",
+                        candidate.display()
+                    )))
+                }
+            }
+        }
+        found
+    };
+    let mut config = FormatConfig::default();
+    let mut standard = VHDLStandard::default();
+    if let Some(path) = path {
+        let load = || -> Result<(FormatConfig, VHDLStandard), String> {
+            let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+            let config = FormatConfig::from_toml(&text)?;
+            let root = text.parse::<toml::Table>().map_err(|err| err.to_string())?;
+            let standard = if let Some(value) = root.get("standard") {
+                VHDLStandard::try_from(value.as_str().ok_or("standard must be a string")?)
+                    .map_err(|()| "standard must be 1993, 2008 or 2019")?
+            } else {
+                VHDLStandard::default()
+            };
+            Ok((config, standard))
+        };
+        (config, standard) =
+            load().map_err(|err| CliFormatError::Config(format!("{}: {err}", path.display())))?;
+    }
+    if let Some(width) = args.max_width {
+        config.max_width = width;
+    }
+    if let Some(width) = args.indent_width {
+        config.indent_width = width;
+    }
+    if let Some(case) = args.keyword_case {
+        config.keyword_case = case;
+    }
+    if let Some(align) = args.align_declarations {
+        config.align_declarations = align;
+    }
+    if let Some(align) = args.align_associations {
+        config.align_associations = align;
+    }
+    if let Some(value) = &args.standard {
+        standard = VHDLStandard::try_from(value.as_str()).expect("clap validates the standard");
+    }
+    config.validate().map_err(CliFormatError::Config)?;
+    Ok((config, standard))
 }
 
 fn run_formatter(result: Result<(), CliFormatError>) {
@@ -91,16 +193,24 @@ fn run_formatter(result: Result<(), CliFormatError>) {
     }
 }
 
-fn format_file(path: &Path, config: &FormatConfig) -> Result<(), CliFormatError> {
-    let parser = VHDLParser::new(VHDLStandard::default());
+fn format_file(
+    path: &Path,
+    config: &FormatConfig,
+    standard: VHDLStandard,
+) -> Result<(), CliFormatError> {
+    let parser = VHDLParser::new(standard);
     let input = Latin1String::from_vec(std::fs::read(path)?).to_string();
     write_stdout(&format_text_with_config(&parser, path, &input, config)?)
 }
 
-fn format_stdin(path: Option<&Path>, config: &FormatConfig) -> Result<(), CliFormatError> {
+fn format_stdin(
+    path: Option<&Path>,
+    config: &FormatConfig,
+    standard: VHDLStandard,
+) -> Result<(), CliFormatError> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
-    let parser = VHDLParser::new(VHDLStandard::default());
+    let parser = VHDLParser::new(standard);
     write_stdout(&format_text_with_config(
         &parser,
         path.unwrap_or_else(|| Path::new("<stdin>.vhd")),
@@ -119,6 +229,7 @@ fn write_stdout(output: &str) -> Result<(), CliFormatError> {
 
 #[derive(Debug)]
 enum CliFormatError {
+    Config(String),
     Io(io::Error),
     Format(FormatError),
 }
@@ -137,6 +248,7 @@ impl From<FormatError> for CliFormatError {
 
 fn show_format_error(err: &CliFormatError) {
     match err {
+        CliFormatError::Config(message) => eprintln!("formatter configuration: {message}"),
         CliFormatError::Io(err) => eprintln!("{err}"),
         CliFormatError::Format(FormatError::InputDiagnostics(diagnostics)) => {
             eprintln!("input contains {} parse diagnostic(s)", diagnostics.len());

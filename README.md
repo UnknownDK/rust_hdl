@@ -220,6 +220,83 @@ well as ensuring the users are not running and outdated version.
 - Comments will be part of the AST to support document generation.
 - Separate parsing from semantic analysis to allow code formatting on non-semantically correct code.
 
+## VHDL formatter
+
+The experimental formatter preserves identifiers, literals, comments and token
+order while applying consistent layout and width-aware wrapping. It reparses and
+verifies the result before writing anything to stdout; errors go to stderr.
+
+```sh
+cargo build --release -p vhdl_lang --bin vhdl_lang
+target/release/vhdl_lang --format design.vhd
+target/release/vhdl_lang --format-stdin --stdin-filepath design.vhd --max-width 100 --indent-width 4 --keyword-case upper
+```
+
+Both modes write to stdout, without modifying the input file. For an external
+editor formatter, use `--format-stdin` and pass the document path through
+`--stdin-filepath` for diagnostics and project configuration discovery. The CLI
+defaults to VHDL-2008; `--standard 1993|2008|2019` overrides the project standard.
+The library API accepts a parser configured for any of those standards.
+
+The defaults are `max_width = 100`, `indent_width = 4` and
+`keyword_case = lower`. Keyword case supports `lower` and `upper`, including word
+operators such as `and` and `not`; identifiers, quoted operator symbols and
+literals are unaffected. Width counts Unicode scalar values. Unbreakable tokens,
+preserved comments and disabled regions may exceed the preferred width.
+
+To enable selective alignment (declaration colons and map arrows, but not
+default values), add this section to your project's `vhdl_ls.toml`:
+
+```toml
+[format]
+max_width = 100
+indent_width = 4
+keyword_case = "lower"
+align_declarations = true
+align_associations = true
+```
+
+The formatter uses the nearest `vhdl_ls.toml` in the input file's directory or
+its ancestors. Stdin uses `--stdin-filepath`, including for unsaved files; without
+that flag it searches from the working directory. The nearest file is used on
+its own, without merging parent files. Existing Zed stdin commands therefore
+pick up project settings without additional formatter flags. Library APIs do
+not discover files implicitly; use `FormatConfig::from_toml` to load settings.
+
+CLI options override project settings. Use `--format-config path/to/settings.toml`
+to select a file explicitly, or `--no-format-config` to disable discovery.
+`--align-declarations` and `--align-associations` enable alignment;
+`--align-declarations=false` and `--align-associations=false` disable it. Both
+default to false. Width must be 1–10000, indentation 0–32 spaces. Unknown options
+in `[format]`, invalid values, and unreadable selected configuration files are
+errors reported on stderr without formatted output.
+
+Colons align in adjacent object/file declarations, interfaces and record fields.
+Arrows align in named port/generic map associations; calls and aggregates retain
+ordinary spacing. Blank lines, standalone comments and other item kinds separate
+groups. Rows with internal/trailing comments or wrapped content do not contribute
+padding. Alignment falls back to ordinary spacing if the combined columns would
+exceed the configured width. Modes, types, defaults and assignments are not
+separately aligned.
+
+Use `format_source` for the default library API, or
+`format_source_with_config(&parser, &source, &FormatConfig { ... })` to configure
+it. `FormatConfig` and `KeywordCase` are re-exported by `vhdl_lang`. When starting
+from raw text, `format_text_with_config(&parser, path, text, &config)` also
+preserves original disabled-region line endings before `Source` normalizes them.
+The CLI uses this raw-text entry point. The lower-level AST-only
+`VHDLFormatter::format_design_file` does not provide source-preservation checks.
+
+Code between exact `-- vhdl_ls off` and `-- vhdl_ls on` directives remains
+unchanged while surrounding code is formatted. An unmatched `off` extends to
+EOF. Trailing directives and block-comment directives are also supported;
+occurrences inside strings, identifiers or ordinary comment prose are not
+directives. Disabled text need not be valid VHDL.
+
+See [formatter tests and implementation notes](vhdl_lang/tests/formatting/README.md)
+for layout policy, corpus coverage and benchmark commands. Identifier case
+normalization, tabs and VSG compatibility are not implemented.
+
 ## Building the project locally
 
 1) Make sure that you have the [Rust toolchain](https://www.rust-lang.org/tools/install) installed.
