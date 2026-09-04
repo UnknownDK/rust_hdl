@@ -180,14 +180,23 @@ impl DisabledRegions {
 }
 
 fn disabled_end(text: &str, start: usize) -> usize {
-    let mut offset = start;
-    // Inside a disabled region the contents are opaque, including malformed
-    // strings. Recognize a closing directive on a line without lexing the body.
-    for line in text[start..].split_inclusive('\n') {
-        if let Some(end) = crate::syntax::ignored_region_end_in_line(line) {
-            return offset + end;
+    let mut scanner = crate::syntax::IgnoredRegionEnd::default();
+    for (offset, ch) in text[start..].char_indices() {
+        if scanner.push(ch) {
+            let end = start + offset + ch.len_utf8();
+            // Include the line ending immediately after a block directive in
+            // the preserved region, just as for a line-comment directive.
+            return end
+                + if ch == '\n' {
+                    0
+                } else if text[end..].starts_with("\r\n") {
+                    2
+                } else if text[end..].starts_with('\n') {
+                    1
+                } else {
+                    0
+                };
         }
-        offset += line.len();
     }
     text.len()
 }
