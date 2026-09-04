@@ -1704,50 +1704,110 @@ fn get_leading_comments(reader: &mut ContentReader<'_>) -> Result<Vec<Comment>, 
 /// Disabled source is opaque, not a token stream. In particular, an invalid
 /// string must not consume the closing directive or produce lexer diagnostics.
 fn skip_ignored_region(reader: &mut ContentReader<'_>) {
-    let mut line = String::new();
-    loop {
-        let start = reader.clone();
-        line.clear();
-        while let Some(ch) = reader.pop_char() {
-            line.push(ch);
-            if ch == '\n' {
-                break;
-            }
-        }
-        if let Some(end) = ignored_region_end_in_line(&line) {
-            reader.set_to(&start);
-            for _ in line[..end].chars() {
-                let _ = reader.pop_char();
-            }
-            return;
-        }
-        if line.is_empty() {
+    let mut end = IgnoredRegionEnd::default();
+    while let Some(ch) = reader.pop_char() {
+        if end.push(ch) {
             return;
         }
     }
 }
 
-/// Shared with the formatter's lossless source-region extraction.
-pub(crate) fn ignored_region_end_in_line(line: &str) -> Option<usize> {
-    if line
-        .find("--")
-        .is_some_and(|i| line[i + 2..].trim() == "vhdl_ls on")
-    {
-        return Some(line.len());
+/// Shared with the formatter's lossless source-region extraction. Only comment
+/// boundaries are scanned: malformed literals and non-Latin-1 text are opaque.
+/// The state is bounded even for arbitrarily long disabled comments.
+#[derive(Default)]
+pub(crate) struct IgnoredRegionEnd {
+    state: IgnoredCommentState,
+}
+
+enum IgnoredCommentState {
+    Search(char),
+    Line(ClosingDirective),
+    Block {
+        directive: ClosingDirective,
+        star: bool,
+    },
+}
+
+impl std::default::Default for IgnoredCommentState {
+    fn default() -> Self {
+        Self::Search('\0')
     }
-    if let Some(i) = line.find("/*") {
-        if let Some(end) = line[i + 2..].find("*/") {
-            if line[i + 2..i + 2 + end].trim() == "vhdl_ls on" {
-                let end = i + 2 + end + 2;
-                return Some(if line[end..].starts_with('\n') {
-                    end + 1
+}
+
+impl IgnoredRegionEnd {
+    /// Returns true just after a complete closing directive (including a line
+    /// comment's newline). An unterminated region naturally extends to EOF.
+    pub(crate) fn push(&mut self, ch: char) -> bool {
+        match &mut self.state {
+            IgnoredCommentState::Search(previous) => {
+                if *previous == '-' && ch == '-' {
+                    self.state = IgnoredCommentState::Line(ClosingDirective::default());
+                } else if *previous == '/' && ch == '*' {
+                    self.state = IgnoredCommentState::Block {
+                        directive: ClosingDirective::default(),
+                        star: false,
+                    };
                 } else {
-                    end
-                });
+                    *previous = ch;
+                }
+            }
+            IgnoredCommentState::Line(directive) => {
+                if ch == '\n' {
+                    let matched = directive.matches();
+                    self.state = IgnoredCommentState::default();
+                    return matched;
+                }
+                directive.push(ch);
+            }
+            IgnoredCommentState::Block { directive, star } => {
+                if *star && ch == '/' {
+                    let matched = directive.matches();
+                    self.state = IgnoredCommentState::default();
+                    return matched;
+                }
+                if *star {
+                    directive.push('*');
+                }
+                *star = ch == '*';
+                if !*star {
+                    directive.push(ch);
+                }
             }
         }
+        false
     }
-    None
+}
+
+/// Incrementally matches `comment.trim() == "vhdl_ls on"` without allocating.
+#[derive(Default)]
+struct ClosingDirective {
+    position: usize,
+    invalid: bool,
+}
+
+impl ClosingDirective {
+    const TEXT: &'static [u8] = b"vhdl_ls on";
+
+    fn push(&mut self, ch: char) {
+        if self.invalid
+            || (ch.is_whitespace() && (self.position == 0 || self.position == Self::TEXT.len()))
+        {
+            return;
+        }
+        if Self::TEXT
+            .get(self.position)
+            .is_some_and(|&byte| char::from(byte) == ch)
+        {
+            self.position += 1;
+        } else {
+            self.invalid = true;
+        }
+    }
+
+    fn matches(&self) -> bool {
+        !self.invalid && self.position == Self::TEXT.len()
+    }
 }
 
 /// Skip whitespace but not newline
@@ -3665,5 +3725,41 @@ End after
         ",
         );
         assert_eq!(&tokens, &[Identifier, Is, Identifier, End, After]);
+    }
+
+    #[test]
+    fn ignored_regions_recognize_complete_line_and_block_directives() {
+        for closing in [
+            "/*\nvhdl_ls on\n*/",
+            "/* ordinary */ /* vhdl_ls on */",
+            "/* ordinary\n-- vhdl_ls on\n*/ /* vhdl_ls on */",
+            "-- prose /* vhdl_ls on */\n/* vhdl_ls on */",
+            "/* vhdl_ls on extra */ /* vhdl_ls on */",
+            "/* VHDL_LS ON */\n-- vhdl_ls on",
+            "/* vhdl_ls on **/\n-- vhdl_ls on",
+            "/*\r\n\t vhdl_ls on \r\n*/",
+        ] {
+            let code = format!("entity e is\n/* vhdl_ls off */\n€ bad \"\n{closing}\nend;");
+            assert_eq!(
+                kinds_tokenize(&code),
+                vec![Entity, Identifier, Is, End, SemiColon],
+                "{closing}"
+            );
+        }
+        for not_a_directive in [
+            "-- prose /* vhdl_ls on */",
+            "/* ordinary\n-- vhdl_ls on\n*/",
+            "/* vhdl_ls on extra */",
+            "/* VHDL_LS ON */",
+            "/* vhdl_ls on **/",
+            "-- vhdl_ls on extra",
+        ] {
+            let code = format!("entity e is\n-- vhdl_ls off\n{not_a_directive}\nend;");
+            assert_eq!(
+                kinds_tokenize(&code),
+                vec![Entity, Identifier, Is],
+                "{not_a_directive}"
+            );
+        }
     }
 }

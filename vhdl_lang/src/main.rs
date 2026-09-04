@@ -13,6 +13,25 @@ use vhdl_lang::{
     Latin1String, MessagePrinter, Project, Severity, SeverityMap, VHDLParser, VHDLStandard,
 };
 
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+enum InputEncoding {
+    #[default]
+    Utf8,
+    Latin1,
+}
+
+impl InputEncoding {
+    fn decode(self, bytes: Vec<u8>) -> io::Result<String> {
+        match self {
+            Self::Utf8 => String::from_utf8(bytes).map_err(|err| {
+                io::Error::new(io::ErrorKind::InvalidData,
+                    format!("formatter input is not valid UTF-8 ({err}); for ISO-8859-1 input, use --input-encoding latin1"))
+            }),
+            Self::Latin1 => Ok(Latin1String::from_vec(bytes).to_string()),
+        }
+    }
+}
+
 #[derive(Debug, clap::Args)]
 #[group(required = true, multiple = false)]
 pub struct Group {
@@ -47,6 +66,10 @@ struct Args {
     /// Source path for diagnostics and project configuration discovery in stdin mode.
     #[arg(long, requires = "format_stdin")]
     stdin_filepath: Option<PathBuf>,
+
+    /// Formatter input encoding for files and stdin. Output is always UTF-8.
+    #[arg(long, value_enum, default_value_t = InputEncoding::Utf8, conflicts_with = "config")]
+    input_encoding: InputEncoding,
 
     /// Preferred formatter line width (unbreakable text may exceed this).
     #[arg(long)]
@@ -96,9 +119,14 @@ fn main() {
         run_formatter((|| {
             let (config, standard) = formatter_settings(&args)?;
             if let Some(path) = &args.group.format {
-                format_file(path, &config, standard)
+                format_file(path, &config, standard, args.input_encoding)
             } else {
-                format_stdin(args.stdin_filepath.as_deref(), &config, standard)
+                format_stdin(
+                    args.stdin_filepath.as_deref(),
+                    &config,
+                    standard,
+                    args.input_encoding,
+                )
             }
         })());
     }
@@ -204,9 +232,10 @@ fn format_file(
     path: &Path,
     config: &FormatConfig,
     standard: VHDLStandard,
+    encoding: InputEncoding,
 ) -> Result<(), CliFormatError> {
     let parser = VHDLParser::new(standard);
-    let input = Latin1String::from_vec(std::fs::read(path)?).to_string();
+    let input = encoding.decode(std::fs::read(path)?)?;
     write_stdout(&format_text_with_config(&parser, path, &input, config)?)
 }
 
@@ -214,9 +243,11 @@ fn format_stdin(
     path: Option<&Path>,
     config: &FormatConfig,
     standard: VHDLStandard,
+    encoding: InputEncoding,
 ) -> Result<(), CliFormatError> {
-    let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    let mut bytes = Vec::new();
+    io::stdin().read_to_end(&mut bytes)?;
+    let input = encoding.decode(bytes)?;
     let parser = VHDLParser::new(standard);
     write_stdout(&format_text_with_config(
         &parser,
@@ -326,5 +357,40 @@ fn show_diagnostics_to(
 
     if !diagnostics.is_empty() {
         let _ = writeln!(writer, "Found {} diagnostics", diagnostics.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_formatter_encoding_does_not_conflict_with_analysis_mode() {
+        assert!(Args::try_parse_from(["vhdl_lang", "--config", "project.toml"]).is_ok());
+        assert!(Args::try_parse_from([
+            "vhdl_lang",
+            "--config",
+            "project.toml",
+            "--input-encoding",
+            "latin1"
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn formatter_accepts_only_supported_input_encodings() {
+        for encoding in ["utf8", "latin1"] {
+            assert!(Args::try_parse_from([
+                "vhdl_lang",
+                "--format-stdin",
+                "--input-encoding",
+                encoding
+            ])
+            .is_ok());
+        }
+        assert!(
+            Args::try_parse_from(["vhdl_lang", "--format-stdin", "--input-encoding", "utf16"])
+                .is_err()
+        );
     }
 }
