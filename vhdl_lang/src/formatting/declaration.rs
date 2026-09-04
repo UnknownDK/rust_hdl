@@ -110,19 +110,22 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_token_id(span.start_token, buffer);
-        if object_decl.class == ObjectClass::SharedVariable {
+        buffer.fill_group(|buffer| {
+            self.format_token_id(span.start_token, buffer);
+            if object_decl.class == ObjectClass::SharedVariable {
+                buffer.push_whitespace();
+                self.format_token_id(span.start_token + 1, buffer);
+            }
             buffer.push_whitespace();
-            self.format_token_id(span.start_token + 1, buffer);
-        }
-        buffer.push_whitespace();
-        self.format_ident_list(&object_decl.idents, buffer);
-        self.format_token_id(object_decl.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(&object_decl.subtype_indication, buffer);
-        self.format_default_expression(object_decl.expression.as_ref(), buffer);
-
-        self.format_token_id(span.end_token, buffer);
+            self.format_ident_list(&object_decl.idents, buffer);
+            self.format_token_id(object_decl.colon_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                self.format_subtype_indication(&object_decl.subtype_indication, buffer);
+                self.format_default_expression(object_decl.expression.as_ref(), buffer);
+            });
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_file_declaration(
@@ -131,25 +134,29 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_token_id(span.start_token, buffer);
-        buffer.push_whitespace();
-        self.format_ident_list(&file_decl.idents, buffer);
-        self.format_token_id(file_decl.colon_token, buffer);
-        buffer.push_whitespace();
-        self.format_subtype_indication(&file_decl.subtype_indication, buffer);
-        if let Some((token, open_information)) = &file_decl.open_info {
+        buffer.fill_group(|buffer| {
+            self.format_token_id(span.start_token, buffer);
             buffer.push_whitespace();
-            self.format_token_id(*token, buffer);
-            buffer.push_whitespace();
-            self.format_expression(open_information.as_ref(), buffer);
-        }
-        if let Some((token, file_name)) = &file_decl.file_name {
-            buffer.push_whitespace();
-            self.format_token_id(*token, buffer);
-            buffer.push_whitespace();
-            self.format_expression(file_name.as_ref(), buffer);
-        }
-        self.format_token_id(span.end_token, buffer);
+            self.format_ident_list(&file_decl.idents, buffer);
+            self.format_token_id(file_decl.colon_token, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                self.format_subtype_indication(&file_decl.subtype_indication, buffer);
+                if let Some((token, open_information)) = &file_decl.open_info {
+                    buffer.soft_line();
+                    self.format_token_id(*token, buffer);
+                    buffer.soft_line();
+                    self.format_expression(open_information.as_ref(), buffer);
+                }
+                if let Some((token, file_name)) = &file_decl.file_name {
+                    buffer.soft_line();
+                    self.format_token_id(*token, buffer);
+                    buffer.soft_line();
+                    self.format_expression(file_name.as_ref(), buffer);
+                }
+            });
+            self.format_token_id(span.end_token, buffer);
+        });
     }
 
     pub fn format_type_declaration(
@@ -158,6 +165,23 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
+        if let TypeDefinition::Subtype(subtype) = &type_decl.def {
+            buffer.fill_group(|buffer| {
+                self.format_wrapped_token_span(
+                    TokenSpan::new(
+                        span.start_token,
+                        type_decl.is_token().expect("subtype has is"),
+                    ),
+                    buffer,
+                );
+                buffer.with_indent(|buffer| {
+                    buffer.soft_line();
+                    self.format_subtype_indication(subtype, buffer);
+                });
+                self.format_token_id(span.end_token, buffer);
+            });
+            return;
+        }
         self.format_token_span(
             TokenSpan::new(span.start_token, type_decl.ident.tree.token),
             buffer,

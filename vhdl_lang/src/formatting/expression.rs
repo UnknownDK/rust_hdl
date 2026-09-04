@@ -20,37 +20,55 @@ impl VHDLFormatter<'_> {
         let span = expression.span;
         use Expression::*;
         match &expression.item {
-            Binary(op, lhs, rhs) => {
-                self.format_expression(lhs.as_ref().as_ref(), buffer);
-                buffer.push_whitespace();
-                self.format_token_id(op.token, buffer);
-                buffer.push_whitespace();
-                self.format_expression(rhs.as_ref().as_ref(), buffer);
+            Binary(..) => {
+                buffer.expression_group(|buffer| self.format_binary_chain(expression, buffer))
             }
             Unary(op, rhs) => {
-                self.format_token_id(op.token, buffer);
-                match op.item.item {
-                    Operator::Minus | Operator::Plus | Operator::QueQue => {
-                        // Leave as unary operator without whitespace
-                    }
-                    _ => buffer.push_whitespace(),
-                }
-                self.format_expression(rhs.as_ref().as_ref(), buffer);
+                buffer.expression_group(|buffer| {
+                    self.format_token_id(op.token, buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_break(!matches!(
+                            op.item.item,
+                            Operator::Minus | Operator::Plus | Operator::QueQue
+                        ));
+                        self.format_expression(rhs.as_ref().as_ref(), buffer);
+                    });
+                });
             }
             Aggregate(aggregate) => {
-                self.format_token_id(span.start_token, buffer);
-                self.format_element_associations(aggregate, buffer);
-                self.format_token_id(span.end_token, buffer);
+                self.format_target_aggregate(aggregate, span, buffer);
             }
             Qualified(qualified_expr) => self.format_qualified_expression(qualified_expr, buffer),
             Name(name) => self.format_name(WithTokenSpan::new(name, span), buffer),
             Literal(_) => self.format_token_span(span, buffer),
             New(allocator) => self.format_allocator(allocator, buffer),
             Parenthesized(expression) => {
-                self.format_token_id(span.start_token, buffer);
-                self.format_conditional_expression(expression.as_ref().as_ref(), buffer);
-                self.format_token_id(span.end_token, buffer);
+                buffer.expression_group(|buffer| {
+                    self.format_token_id(span.start_token, buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_break(false);
+                        self.format_conditional_expression(expression.as_ref().as_ref(), buffer);
+                    });
+                    buffer.soft_break(false);
+                    self.format_token_id(span.end_token, buffer);
+                });
             }
+        }
+    }
+
+    // Walk the left spine at the same indentation: a + b + c must not become
+    // a staircase just because binary operators are represented as a tree.
+    fn format_binary_chain(&self, expression: WithTokenSpan<&Expression>, buffer: &mut Buffer) {
+        if let Expression::Binary(op, lhs, rhs) = expression.item {
+            self.format_binary_chain(lhs.as_ref().as_ref(), buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                self.format_token_id(op.token, buffer);
+                buffer.push_whitespace();
+                self.format_expression(rhs.as_ref().as_ref(), buffer);
+            });
+        } else {
+            self.format_expression(expression, buffer);
         }
     }
 
@@ -80,44 +98,52 @@ impl VHDLFormatter<'_> {
         buffer: &mut Buffer,
     ) {
         for (i, association) in associations.iter().enumerate() {
-            match &association.item {
+            buffer.fill_group(|buffer| match &association.item {
                 ElementAssociation::Positional(expression) => {
                     self.format_expression(expression.as_ref(), buffer)
                 }
                 ElementAssociation::Named(choices, expression) => {
-                    for (j, choice) in choices.iter().enumerate() {
-                        self.format_choice(choice, buffer);
-                        if j < choices.len() - 1 {
-                            buffer.push_whitespace();
-                            self.format_token_id(choice.span.end_token + 1, buffer);
-                            buffer.push_whitespace();
+                    buffer.group(|buffer| {
+                        for (j, choice) in choices.iter().enumerate() {
+                            self.format_choice(choice, buffer);
+                            if j < choices.len() - 1 {
+                                buffer.soft_line();
+                                self.format_token_id(choice.span.end_token + 1, buffer);
+                                buffer.push_whitespace();
+                            }
                         }
-                    }
+                    });
                     buffer.push_whitespace();
                     self.format_token_id(expression.span.start_token - 1, buffer);
-                    buffer.push_whitespace();
-                    self.format_expression(expression.as_ref(), buffer);
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_line();
+                        self.format_expression(expression.as_ref(), buffer);
+                    });
                 }
-            }
+            });
             if i < associations.len() - 1 {
                 self.format_token_id(association.span.end_token + 1, buffer);
-                buffer.push_whitespace();
+                buffer.soft_line();
             }
         }
     }
 
     pub fn format_subtype_indication(&self, indication: &SubtypeIndication, buffer: &mut Buffer) {
-        if let Some(resolution) = &indication.resolution {
-            self.format_resolution_indication(resolution, buffer);
-            buffer.push_whitespace();
-        }
-        self.format_name(indication.type_mark.as_ref(), buffer);
-        if let Some(constraint) = &indication.constraint {
-            if matches!(constraint.item, SubtypeConstraint::Range(_)) {
-                buffer.push_whitespace();
+        buffer.fill_group(|buffer| {
+            if let Some(resolution) = &indication.resolution {
+                self.format_resolution_indication(resolution, buffer);
+                buffer.soft_line();
             }
-            self.format_subtype_constraint(constraint, buffer)
-        }
+            self.format_name(indication.type_mark.as_ref(), buffer);
+            if let Some(constraint) = &indication.constraint {
+                buffer.with_indent(|buffer| {
+                    if matches!(constraint.item, SubtypeConstraint::Range(_)) {
+                        buffer.soft_line();
+                    }
+                    self.format_subtype_constraint(constraint, buffer);
+                });
+            }
+        });
     }
 
     pub fn format_element_resolution(&self, resolution: &ElementResolution, buffer: &mut Buffer) {
@@ -164,12 +190,14 @@ impl VHDLFormatter<'_> {
         expression: Option<&WithTokenSpan<ConditionalExpression>>,
         buffer: &mut Buffer,
     ) {
-        if let Some(expr) = expression {
-            buffer.push_whitespace();
-            self.format_token_id(expr.span.start_token - 1, buffer);
-            buffer.push_whitespace();
-            self.format_conditional_expression(expr.as_ref(), buffer);
-        }
+        buffer.fill_group(|buffer| {
+            if let Some(expr) = expression {
+                buffer.soft_line();
+                self.format_token_id(expr.span.start_token - 1, buffer);
+                buffer.soft_line();
+                self.format_conditional_expression(expr.as_ref(), buffer);
+            }
+        });
     }
 
     pub fn format_qualified_expression(
@@ -184,13 +212,17 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_allocator(&self, allocator: &WithTokenSpan<Allocator>, buffer: &mut Buffer) {
-        // new
-        self.format_token_id(allocator.span.start_token - 1, buffer);
-        buffer.push_whitespace();
-        match &allocator.item {
-            Allocator::Qualified(expr) => self.format_qualified_expression(expr, buffer),
-            Allocator::Subtype(subtype) => self.format_subtype_indication(subtype, buffer),
-        }
+        buffer.fill_group(|buffer| {
+            // new
+            self.format_token_id(allocator.span.start_token - 1, buffer);
+            buffer.with_indent(|buffer| {
+                buffer.soft_line();
+                match &allocator.item {
+                    Allocator::Qualified(expr) => self.format_qualified_expression(expr, buffer),
+                    Allocator::Subtype(subtype) => self.format_subtype_indication(subtype, buffer),
+                }
+            });
+        });
     }
 }
 
@@ -301,12 +333,17 @@ mod test {
 
     #[test]
     fn expression_with_comments() {
-        check_expression(
+        check_formatted(
             "\
 -- Some comment
 A & -- And
 B & -- as well as
 C",
-        )
+            "-- Some comment\nA\n    & -- And\n    B\n    & -- as well as\n    C",
+            Code::expr,
+            |formatter, expression, buffer| {
+                formatter.format_expression(expression.as_ref(), buffer)
+            },
+        );
     }
 }

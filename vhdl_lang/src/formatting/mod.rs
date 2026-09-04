@@ -20,25 +20,28 @@ mod constraint;
 mod context;
 mod declaration;
 mod design;
+mod disabled;
 mod entity;
 mod expression;
 mod interface;
 mod layout;
 mod name;
+mod options;
 mod sequential_statement;
 mod statement;
 mod subprogram;
 mod token;
 
-pub use api::{format_source, FormatError};
+pub use api::{format_source, format_source_with_config, format_text_with_config, FormatError};
+pub use options::{FormatConfig, KeywordCase};
 
 /// The formatter is the main entry point used for formatting a single
 /// Design Unit from AST representation to string representation. In that sense,
 /// the Formatter is the inverse to the Parser.
 ///
 /// Most methods herein are called `format_<node>` where `node` is the AST node to format.
-/// Rather than returning a string, the methods accept a mutable [Buffer] object that they
-/// use to format.
+/// Methods compose documents in a mutable [Buffer]; the complete document is
+/// rendered once with the configured width, indentation and keyword casing.
 ///
 /// The formatter is capable of retaining comment information as well as preserving newlines.
 pub struct VHDLFormatter<'b> {
@@ -50,9 +53,15 @@ impl<'b> VHDLFormatter<'b> {
         VHDLFormatter { tokens }
     }
 
-    /// Format a whole design file.
+    /// Format an already-parsed design file using defaults. Prefer [format_source]
+    /// when source preservation (including disabled regions) and verification
+    /// are required; the AST omits disabled source text.
     pub fn format_design_file(file: &DesignFile) -> String {
-        let mut result = Buffer::new();
+        Self::format_design_file_with_config(file, &FormatConfig::default())
+    }
+
+    pub fn format_design_file_with_config(file: &DesignFile, config: &FormatConfig) -> String {
+        let mut result = Buffer::with_config(*config);
         for (i, (tokens, design_unit)) in file.design_units.iter().enumerate() {
             let formatter = VHDLFormatter::new(tokens);
             formatter.format_any_design_unit(
@@ -69,25 +78,27 @@ impl<'b> VHDLFormatter<'b> {
 }
 
 impl VHDLFormatter<'_> {
-    fn capture(&self, format: impl FnOnce(&Self, &mut Buffer)) -> String {
-        let mut buffer = Buffer::new();
-        format(self, &mut buffer);
-        buffer.into()
-    }
-
     pub fn format_ident_list<T: HasIdent>(&self, idents: &[T], buffer: &mut Buffer) {
-        for ident in idents {
-            let token = ident.ident().token;
-            self.format_token_id(token, buffer);
-            if self
-                .tokens
-                .get_token(token + 1)
-                .is_some_and(|token| token.kind == Kind::Comma)
-            {
-                self.format_token_id(token + 1, buffer);
-                buffer.push_whitespace();
+        buffer.expression_group(|buffer| {
+            for (index, ident) in idents.iter().enumerate() {
+                let token = ident.ident().token;
+                if index == 0 {
+                    self.format_token_id(token, buffer);
+                } else {
+                    buffer.with_indent(|buffer| {
+                        buffer.soft_line();
+                        self.format_token_id(token, buffer);
+                    });
+                }
+                if self
+                    .tokens
+                    .get_token(token + 1)
+                    .is_some_and(|token| token.kind == Kind::Comma)
+                {
+                    self.format_token_id(token + 1, buffer);
+                }
             }
-        }
+        });
     }
 }
 
