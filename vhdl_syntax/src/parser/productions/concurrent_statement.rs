@@ -228,6 +228,9 @@ impl Parser {
                 Some(marker.complete(self))
             }
             _ => {
+                // Consume label and postponed keyword for error recovery
+                self.opt_label();
+                self.opt_token(Keyword(Kw::Postponed));
                 self.expect_tokens_recover([
                     Keyword(Kw::Block),
                     Keyword(Kw::Process),

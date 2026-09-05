@@ -459,6 +459,8 @@ impl Parser {
                 Some(marker.complete(self))
             }
             _ => {
+                // consume label for error recovery
+                self.opt_label();
                 self.expect_tokens_recover([
                     Keyword(Kw::Wait),
                     Keyword(Kw::Assert),
@@ -1032,6 +1034,19 @@ loop
 function f return integer is
 begin
     use work.all;      -- `use` in SubprogramBody follow
+end;
+        ",
+            Parser::subprogram_body
+        );
+    }
+
+    #[test]
+    fn sequential_statement_lone_label() {
+        assert_recovery_snapshot!(
+            "\
+function f return integer is
+begin
+    p:
 end;
         ",
             Parser::subprogram_body
