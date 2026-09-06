@@ -4,23 +4,39 @@
 //
 // Copyright (c)  2024, Lukas Scheller lukasscheller@icloud.com
 
+use crate::interning::{Interned, Interner};
 use crate::latin_1::Latin1Str;
-use crate::token_interning::Symbol;
 use crate::tokens::{TokenKind, Trivia};
+use std::fmt::Debug;
 use std::io::{self, Write};
+use std::sync::RwLock;
+
+static STR_INTERNER: RwLock<Interner<Latin1Str>> = RwLock::new(Interner::new());
 
 /// A source-code token.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Token {
     pub(crate) leading_trivia: Trivia,
-    symbol: Symbol,
+    kind: TokenKind,
+    text: Interned<Latin1Str>,
+}
+
+impl Debug for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Token")
+            .field("leading_trivia", &self.leading_trivia)
+            .field("kind", &self.kind)
+            .field("text", &self.text())
+            .finish()
+    }
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, text: impl Into<Box<Latin1Str>>, leading_trivia: Trivia) -> Token {
+    pub fn new(kind: TokenKind, text: impl AsRef<Latin1Str>, leading_trivia: Trivia) -> Token {
         Token {
             leading_trivia,
-            symbol: Symbol::allocate(kind, text.into()),
+            kind,
+            text: Interned::get(&STR_INTERNER, text.as_ref()),
         }
     }
 
@@ -29,12 +45,12 @@ impl Token {
     }
 
     #[cfg(test)]
-    pub fn simple(kind: TokenKind, text: impl Into<Box<Latin1Str>>) -> Token {
+    pub fn simple(kind: TokenKind, text: impl AsRef<Latin1Str>) -> Token {
         Token::new(kind, text, Trivia::default())
     }
 
     pub fn kind(&self) -> TokenKind {
-        self.symbol.kind()
+        self.kind
     }
 
     pub fn leading_trivia(&self) -> &Trivia {
@@ -46,7 +62,7 @@ impl Token {
     }
 
     pub fn text(&self) -> &Latin1Str {
-        self.symbol.text()
+        self.text.value(&STR_INTERNER)
     }
 
     /// The length of the main content of this token in bytes without any trivia
