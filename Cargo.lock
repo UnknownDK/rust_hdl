@@ -1445,6 +1445,7 @@ dependencies = [
  "predicates",
  "pretty_assertions",
  "rayon",
+ "similar 2.7.0",
  "strum",
  "subst",
  "tempfile",

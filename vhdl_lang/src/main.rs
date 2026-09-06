@@ -4,6 +4,8 @@
 //
 // Copyright (c) 2018, Olof Kraigher olof.kraigher@gmail.com
 
+mod format_cli;
+
 use clap::Parser;
 use itertools::Itertools;
 use std::io::{self, Read, Write};
@@ -39,11 +41,12 @@ pub struct Group {
     #[arg(short, long)]
     config: Option<String>,
 
-    /// Format the passed file and write the contents to stdout.
+    /// Format files or recursively discover .vhd/.vhdl files in directories.
+    /// A single file defaults to stdout; directories/multiple paths need an output mode.
     ///
     /// This is experimental and the formatting behavior will change in the future.
-    #[arg(short, long)]
-    format: Option<PathBuf>,
+    #[arg(short, long, num_args = 1..)]
+    format: Vec<PathBuf>,
 
     /// Format VHDL read from stdin and write the complete result to stdout.
     #[arg(long)]
@@ -67,9 +70,25 @@ struct Args {
     #[arg(long, requires = "format_stdin")]
     stdin_filepath: Option<PathBuf>,
 
-    /// Formatter input encoding for files and stdin. Output is always UTF-8.
+    /// Input encoding. Stdout is UTF-8; --write preserves the selected encoding.
     #[arg(long, value_enum, default_value_t = InputEncoding::Utf8, conflicts_with = "config")]
     input_encoding: InputEncoding,
+
+    /// Report files needing formatting; exit 1 if any differ, without writing.
+    #[arg(long, conflicts_with_all = ["write", "diff", "config"])]
+    check: bool,
+
+    /// Print unified diffs; exit 1 if any differ, without writing.
+    #[arg(long, conflicts_with_all = ["write", "config"])]
+    diff: bool,
+
+    /// Atomically replace formatted files after validating the complete batch.
+    #[arg(long, conflicts_with_all = ["format_stdin", "config"])]
+    write: bool,
+
+    /// Exclude matching paths (repeatable glob; matches even explicitly named files).
+    #[arg(long, conflicts_with_all = ["format_stdin", "config"])]
+    exclude: Vec<String>,
 
     /// Preferred formatter line width (unbreakable text may exceed this).
     #[arg(long)]
@@ -120,30 +139,37 @@ fn main() {
     if let Some(config_path) = &args.group.config {
         parse_and_analyze_project(config_path, args.num_threads, args.libraries.as_ref());
     } else {
-        run_formatter((|| {
-            let (config, standard) = formatter_settings(&args)?;
-            if let Some(path) = &args.group.format {
-                format_file(path, &config, standard, args.input_encoding)
-            } else {
-                format_stdin(
-                    args.stdin_filepath.as_deref(),
-                    &config,
-                    standard,
-                    args.input_encoding,
-                )
+        let result = format_cli::run(&args);
+        match result {
+            Ok(code) => std::process::exit(code),
+            Err(err) => {
+                show_format_error(&err);
+                std::process::exit(
+                    if !args.check
+                        && !args.diff
+                        && !args.write
+                        && matches!(err, CliFormatError::Format(_))
+                    {
+                        1
+                    } else {
+                        2
+                    },
+                );
             }
-        })());
+        }
     }
 }
 
-fn formatter_settings(args: &Args) -> Result<(FormatConfig, VHDLStandard), CliFormatError> {
+fn formatter_settings(
+    args: &Args,
+    source: Option<&Path>,
+) -> Result<(FormatConfig, VHDLStandard), CliFormatError> {
     let path = if args.no_format_config {
         None
     } else if let Some(path) = &args.format_config {
         Some(path.clone())
     } else {
         let cwd = std::env::current_dir()?;
-        let source = args.group.format.as_ref().or(args.stdin_filepath.as_ref());
         // Normalize lexical `..` even for buffers whose file does not exist yet.
         let source = source.map(|source| {
             let mut path = PathBuf::new();
@@ -222,46 +248,6 @@ fn formatter_settings(args: &Args) -> Result<(FormatConfig, VHDLStandard), CliFo
     }
     config.validate().map_err(CliFormatError::Config)?;
     Ok((config, standard))
-}
-
-fn run_formatter(result: Result<(), CliFormatError>) {
-    if let Err(err) = result {
-        show_format_error(&err);
-        std::process::exit(if matches!(err, CliFormatError::Format(_)) {
-            1
-        } else {
-            2
-        });
-    }
-}
-
-fn format_file(
-    path: &Path,
-    config: &FormatConfig,
-    standard: VHDLStandard,
-    encoding: InputEncoding,
-) -> Result<(), CliFormatError> {
-    let parser = VHDLParser::new(standard);
-    let input = encoding.decode(std::fs::read(path)?)?;
-    write_stdout(&format_text_with_config(&parser, path, &input, config)?)
-}
-
-fn format_stdin(
-    path: Option<&Path>,
-    config: &FormatConfig,
-    standard: VHDLStandard,
-    encoding: InputEncoding,
-) -> Result<(), CliFormatError> {
-    let mut bytes = Vec::new();
-    io::stdin().read_to_end(&mut bytes)?;
-    let input = encoding.decode(bytes)?;
-    let parser = VHDLParser::new(standard);
-    write_stdout(&format_text_with_config(
-        &parser,
-        path.unwrap_or_else(|| Path::new("<stdin>.vhd")),
-        &input,
-        config,
-    )?)
 }
 
 fn write_stdout(output: &str) -> Result<(), CliFormatError> {
