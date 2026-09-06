@@ -18,7 +18,7 @@ pub fn format_text_with_config(
     text: &str,
     config: &FormatConfig,
 ) -> Result<String, FormatError> {
-    let disabled = super::disabled::DisabledRegions::new(text);
+    let disabled = super::disabled::DisabledRegions::new(text, parser.standard);
     if disabled.is_empty() {
         return format_source_with_config(parser, &Source::inline(path, text), config);
     }
@@ -121,7 +121,7 @@ pub fn format_source_with_config(
             .filter_map(|line| contents.get_line(line))
             .collect::<String>()
     };
-    let disabled = super::disabled::DisabledRegions::new(&source_text);
+    let disabled = super::disabled::DisabledRegions::new(&source_text, parser.standard);
     let original_source = source;
     let masked_source;
     let source = if disabled.is_empty() {

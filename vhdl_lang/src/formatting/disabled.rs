@@ -14,7 +14,7 @@ pub(super) struct DisabledRegions {
 }
 
 impl DisabledRegions {
-    pub fn new(text: &str) -> Self {
+    pub fn new(text: &str, standard: crate::VHDLStandard) -> Self {
         if !text.contains("vhdl_ls off") {
             return Self {
                 masked: String::new(),
@@ -34,6 +34,7 @@ impl DisabledRegions {
         let bytes = text.as_bytes();
         let mut copied = 0;
         let mut i = 0;
+        let mut can_be_char = true;
         while i < bytes.len() {
             let comment = if bytes[i..].starts_with(b"--") {
                 let end = text[i..].find('\n').map_or(text.len(), |n| i + n);
@@ -73,10 +74,33 @@ impl DisabledRegions {
             }
             // Do not interpret comment delimiters inside strings, extended
             // identifiers, or character literals as formatter directives.
-            if bytes[i] == b'\'' && i + 2 < bytes.len() && bytes[i + 2] == b'\'' {
-                i += 3;
+            if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] >= 0x80 {
+                let start = i;
+                i += 1;
+                while i < bytes.len()
+                    && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' || bytes[i] >= 0x80)
+                {
+                    i += 1;
+                }
+                let word = &text[start..i];
+                // As in the tokenizer's IR1045 rule, an apostrophe after a
+                // name is a qualification/attribute tick, not a character.
+                // In particular, character'('"') must not hide later directives.
+                can_be_char = bytes[start].is_ascii_digit()
+                    || standard.keywords().iter().any(|kind| {
+                        *kind != crate::syntax::Kind::All
+                            && word.eq_ignore_ascii_case(crate::kind_str(*kind))
+                    });
+            } else if bytes[i] == b'\'' && can_be_char {
+                let character_end = text[i + 1..].chars().next().map(|ch| i + 1 + ch.len_utf8());
+                if let Some(end) = character_end.filter(|&end| bytes.get(end) == Some(&b'\'')) {
+                    i = end + 1;
+                } else {
+                    i += 1;
+                }
             } else if matches!(bytes[i], b'"' | b'\\') {
                 let delimiter = bytes[i];
+                can_be_char = delimiter != b'\\';
                 i += 1;
                 while i < bytes.len() {
                     if bytes[i] == delimiter {
@@ -88,6 +112,9 @@ impl DisabledRegions {
                     i += 1;
                 }
             } else {
+                if !bytes[i].is_ascii_whitespace() {
+                    can_be_char = !matches!(bytes[i], b')' | b']');
+                }
                 i += 1;
             }
         }
@@ -213,7 +240,10 @@ mod tests {
             "/*\n-- vhdl_ls off\n*/",
             r#"\-- vhdl_ls off\"#,
         ] {
-            assert!(DisabledRegions::new(input).is_empty(), "{input}");
+            assert!(
+                DisabledRegions::new(input, crate::VHDLStandard::default()).is_empty(),
+                "{input}"
+            );
         }
     }
 
@@ -224,7 +254,7 @@ mod tests {
             "-- vhdl_ls off\r\ninvalid\r\n-- vhdl_ls on\r\n",
             "-- vhdl_ls off\nno ending newline",
         ] {
-            let regions = DisabledRegions::new(input);
+            let regions = DisabledRegions::new(input, crate::VHDLStandard::default());
             assert_eq!(regions.restore(&regions.masked).unwrap(), input);
         }
     }
