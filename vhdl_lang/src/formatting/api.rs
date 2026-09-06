@@ -18,21 +18,40 @@ pub fn format_text_with_config(
     text: &str,
     config: &FormatConfig,
 ) -> Result<String, FormatError> {
+    config.validate().map_err(FormatError::InvalidConfig)?;
     let disabled = super::disabled::DisabledRegions::new(text, parser.standard);
-    if disabled.is_empty() {
-        return format_source_with_config(parser, &Source::inline(path, text), config);
+    let working_text = if disabled.is_empty() {
+        text
+    } else {
+        &disabled.masked
+    };
+    let source = Source::inline(path, working_text);
+    let normalized = source_text(&source);
+    let mut diagnostics = Vec::new();
+    let input = parser.parse_design_source(&source, &mut diagnostics);
+    if !diagnostics.is_empty() {
+        disabled.remap_diagnostics(&mut diagnostics, &Source::inline(path, text), text);
+        return Err(FormatError::InputDiagnostics(diagnostics));
     }
-    let source = Source::inline(path, text);
-    let masked = Source::inline(path, &disabled.masked);
-    match format_source_with_config(parser, &masked, config) {
-        Ok(output) => disabled
+    let output = VHDLFormatter::format_design_file_with_config(&input, config);
+    let output_file = verify_output(parser, &source, &normalized, &input, &output)?;
+    let output = if let Some(restored) =
+        super::suppression::restore(working_text, &input, &output, &output_file)?
+    {
+        // Suppression changes only layout. Verify the complete result again,
+        // including the code whose original spelling and whitespace we restored.
+        let normalized_output = source_text(&Source::inline(path, &restored));
+        verify_output(parser, &source, &normalized, &input, &normalized_output)?;
+        restored
+    } else {
+        output
+    };
+    if disabled.is_empty() {
+        Ok(output)
+    } else {
+        disabled
             .restore(&output)
-            .ok_or(FormatError::DisabledRegionMismatch),
-        Err(FormatError::InputDiagnostics(mut diagnostics)) => {
-            disabled.remap_diagnostics(&mut diagnostics, &source, text);
-            Err(FormatError::InputDiagnostics(diagnostics))
-        }
-        Err(error) => Err(error),
+            .ok_or(FormatError::DisabledRegionMismatch)
     }
 }
 
@@ -40,6 +59,7 @@ pub fn format_text_with_config(
 #[derive(Debug)]
 pub enum FormatError {
     InvalidConfig(String),
+    InvalidSuppression(String),
     DisabledRegionMismatch,
     InputDiagnostics(Vec<Diagnostic>),
     OutputDiagnostics(Vec<Diagnostic>),
@@ -64,6 +84,9 @@ pub enum FormatError {
 impl fmt::Display for FormatError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidSuppression(message) => {
+                write!(f, "invalid formatter directive: {message}")
+            }
             Self::InvalidConfig(message) => write!(f, "invalid formatter configuration: {message}"),
             Self::DisabledRegionMismatch => {
                 write!(f, "formatted output lost a disabled-region anchor")
@@ -114,44 +137,14 @@ pub fn format_source_with_config(
     source: &Source,
     config: &FormatConfig,
 ) -> Result<String, FormatError> {
-    config.validate().map_err(FormatError::InvalidConfig)?;
-    let source_text = {
-        let contents = source.contents();
-        (0..contents.num_lines())
-            .filter_map(|line| contents.get_line(line))
-            .collect::<String>()
-    };
-    let disabled = super::disabled::DisabledRegions::new(&source_text, parser.standard);
-    let original_source = source;
-    let masked_source;
-    let source = if disabled.is_empty() {
-        source
-    } else {
-        masked_source = Source::inline(source.file_name(), &disabled.masked);
-        &masked_source
-    };
+    format_text_with_config(parser, source.file_name(), &source_text(source), config)
+}
 
-    let mut diagnostics = Vec::new();
-    let input = parser.parse_design_source(source, &mut diagnostics);
-    if !diagnostics.is_empty() {
-        disabled.remap_diagnostics(&mut diagnostics, original_source, &source_text);
-        return Err(FormatError::InputDiagnostics(diagnostics));
-    }
-
-    let output = VHDLFormatter::format_design_file_with_config(&input, config);
-    let input_text = if disabled.is_empty() {
-        &source_text
-    } else {
-        &disabled.masked
-    };
-    verify_output(parser, source, input_text, &input, &output)?;
-    if disabled.is_empty() {
-        Ok(output)
-    } else {
-        disabled
-            .restore(&output)
-            .ok_or(FormatError::DisabledRegionMismatch)
-    }
+fn source_text(source: &Source) -> String {
+    let contents = source.contents();
+    (0..contents.num_lines())
+        .filter_map(|line| contents.get_line(line))
+        .collect()
 }
 
 fn verify_output(
@@ -160,7 +153,7 @@ fn verify_output(
     input_text: &str,
     input: &DesignFile,
     output: &str,
-) -> Result<(), FormatError> {
+) -> Result<DesignFile, FormatError> {
     let mut output_path = PathBuf::from(source.file_name().as_os_str());
     output_path.as_mut_os_string().push(".rust_hdl_formatted");
 
@@ -228,13 +221,13 @@ fn verify_output(
         }
     }
 
-    Ok(())
+    Ok(output_file)
 }
 
 /// Source slices preserve spelling without allocating per-token strings. ASCII
 /// lines use direct offsets; UTF-16 positions on other lines use forward-only
 /// cursors, so even a long non-ASCII line is scanned at most once.
-struct SpellingCursor<'a> {
+pub(super) struct SpellingCursor<'a> {
     text: &'a str,
     lines: Vec<(usize, bool)>,
     line: usize,
@@ -243,12 +236,29 @@ struct SpellingCursor<'a> {
 }
 
 impl<'a> SpellingCursor<'a> {
-    fn new(text: &'a str) -> Self {
+    pub(super) fn new(text: &'a str) -> Self {
         let mut start = 0;
         let mut lines = Vec::new();
-        for line in text.split_inclusive('\n') {
-            lines.push((start, line.is_ascii()));
-            start += line.len();
+        let bytes = text.as_bytes();
+        let mut index = 0;
+        let mut ascii = true;
+        while index < bytes.len() {
+            ascii &= bytes[index].is_ascii();
+            if matches!(bytes[index], b'\r' | b'\n') {
+                lines.push((start, ascii));
+                index += if bytes[index..].starts_with(b"\r\n") {
+                    2
+                } else {
+                    1
+                };
+                start = index;
+                ascii = true;
+            } else {
+                index += 1;
+            }
+        }
+        if start < text.len() {
+            lines.push((start, ascii));
         }
         lines.push((text.len(), true));
         Self {
@@ -260,7 +270,7 @@ impl<'a> SpellingCursor<'a> {
         }
     }
 
-    fn offset(&mut self, pos: crate::Position) -> usize {
+    pub(super) fn offset(&mut self, pos: crate::Position) -> usize {
         let line = pos.line as usize;
         let (start, ascii) = self.lines[line];
         if ascii {

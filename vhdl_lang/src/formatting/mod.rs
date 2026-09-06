@@ -31,6 +31,7 @@ mod options;
 mod sequential_statement;
 mod statement;
 mod subprogram;
+mod suppression;
 mod token;
 
 pub use api::{format_source, format_source_with_config, format_text_with_config, FormatError};

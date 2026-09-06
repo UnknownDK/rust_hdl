@@ -37,7 +37,7 @@ impl DisabledRegions {
         let mut can_be_char = true;
         while i < bytes.len() {
             let comment = if bytes[i..].starts_with(b"--") {
-                let end = text[i..].find('\n').map_or(text.len(), |n| i + n);
+                let end = text[i..].find(['\r', '\n']).map_or(text.len(), |n| i + n);
                 Some((i + 2, end, end))
             } else if bytes[i..].starts_with(b"/*") {
                 let Some(length) = text[i + 2..].find("*/") else {
@@ -50,7 +50,7 @@ impl DisabledRegions {
             };
             if let Some((body, end, after)) = comment {
                 if text[body..end].trim() == "vhdl_ls off" {
-                    let line_start = text[..i].rfind('\n').map_or(0, |n| n + 1);
+                    let line_start = text[..i].rfind(['\r', '\n']).map_or(0, |n| n + 1);
                     let whole_line = text[line_start..i].trim().is_empty();
                     let start = if whole_line { line_start } else { i };
                     let finish = disabled_end(text, after);
@@ -138,21 +138,7 @@ impl DisabledRegions {
             return;
         }
         let map_position = |pos: crate::Position| {
-            let mut offset = 0;
-            for (line_number, line) in self.masked.split_inclusive('\n').enumerate() {
-                if line_number == pos.line as usize {
-                    let mut column = 0;
-                    for ch in line.chars() {
-                        if column >= pos.character {
-                            break;
-                        }
-                        column += ch.len_utf16() as u32;
-                        offset += ch.len_utf8();
-                    }
-                    break;
-                }
-                offset += line.len();
-            }
+            let offset = super::api::SpellingCursor::new(&self.masked).offset(pos);
             let mut original = offset;
             for &(start, end, original_start, original_end) in &self.offsets {
                 if offset < start {
@@ -165,12 +151,20 @@ impl DisabledRegions {
                 original = original_end + offset - end;
             }
             let prefix = &text[..original.min(text.len())];
-            let line = prefix.bytes().filter(|&b| b == b'\n').count() as u32;
-            let last_line = prefix.rsplit('\n').next().unwrap_or("");
-            crate::Position {
-                line,
-                character: last_line.encode_utf16().count() as u32,
+            let mut position = crate::Position::default();
+            let mut previous_cr = false;
+            for ch in prefix.chars() {
+                if matches!(ch, '\r' | '\n') {
+                    if ch != '\n' || !previous_cr {
+                        position.line += 1;
+                    }
+                    position.character = 0;
+                } else {
+                    position.character += ch.len_utf16() as u32;
+                }
+                previous_cr = ch == '\r';
             }
+            position
         };
         for diagnostic in diagnostics {
             diagnostic.pos = source.pos(
@@ -188,7 +182,7 @@ impl DisabledRegions {
         let mut rest = formatted;
         for (marker, original, whole_line) in &self.regions {
             let index = rest.find(marker)?;
-            let line_start = rest[..index].rfind('\n').map_or(0, |n| n + 1);
+            let line_start = rest[..index].rfind(['\r', '\n']).map_or(0, |n| n + 1);
             let prefix_end = if *whole_line && rest[line_start..index].trim().is_empty() {
                 line_start
             } else {
@@ -209,7 +203,7 @@ impl DisabledRegions {
 fn disabled_end(text: &str, start: usize) -> usize {
     let mut scanner = crate::syntax::IgnoredRegionEnd::default();
     for (offset, ch) in text[start..].char_indices() {
-        if scanner.push(ch) {
+        if scanner.push(if ch == '\r' { '\n' } else { ch }) {
             let end = start + offset + ch.len_utf8();
             // Include the line ending immediately after a block directive in
             // the preserved region, just as for a line-comment directive.

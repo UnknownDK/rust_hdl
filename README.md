@@ -21,7 +21,7 @@ target/release/vhdl_lang --format design.vhd
 target/release/vhdl_lang --format-stdin --stdin-filepath design.vhd --max-width 100 --indent-width 4 --keyword-case upper
 ```
 
-Both modes write to stdout, without modifying the input file. For an external
+These single-file and stdin commands write to stdout, without modifying the input file. For an external
 editor formatter, use `--format-stdin` and pass the document path through
 `--stdin-filepath` for diagnostics and project configuration discovery. The CLI
 defaults to VHDL-2008; `--standard 1993|2008|2019` overrides the project standard.
@@ -30,9 +30,48 @@ The library API accepts a parser configured for any of those standards.
 Both file and stdin input default to UTF-8. For legacy ISO-8859-1 input, pass
 `--input-encoding latin1` explicitly; invalid UTF-8 otherwise fails without
 formatted output. Output is always UTF-8, including when Latin-1 input is
-selected. This replaces the formatter's previous implicit Latin-1 file decoding
+selected. In-place writes preserve the explicitly selected input encoding. This replaces the formatter's previous implicit Latin-1 file decoding
 and makes file and stdin behavior consistent. It does not change the language
 server's source-loading policy.
+
+### Repository formatting and CI
+
+Pass multiple files or directories to `--format`, with one of these output modes:
+
+```sh
+target/release/vhdl_lang --format rtl/ testbench/ --check
+target/release/vhdl_lang --format rtl/ --diff
+target/release/vhdl_lang --format rtl/ testbench/ --write --exclude 'vendor/**' --exclude '*_generated.vhd'
+```
+
+Directories are searched recursively for `.vhd` and `.vhdl` files, ignoring
+extension case. Duplicate paths are formatted once, in deterministic path order.
+`.git`, `.hg`, and `.svn` directories and discovered symbolic links are skipped;
+explicit symbolic links are rejected. Each selected file uses its own nearest
+project configuration, unless `--format-config` or `--no-format-config` overrides
+discovery. Multiple files and directories require an explicit output mode.
+
+`--exclude` is repeatable. Globs match the supplied path, its basename, or its
+path relative to the working directory or any supplied directory. Matching
+directories are pruned, and exclusions also apply to explicitly selected files.
+Quote globs to prevent shell expansion. Git ignore files are not read.
+
+`--check` lists files that would change. `--diff` prints unified diffs. Both
+return **0** when all selected files are formatted, **1** when changes are needed,
+and **2** on input, configuration, or I/O errors. Both also support stdin.
+Empty or fully excluded selections succeed. `--write` returns 0 on success and
+2 on failure. The three modes are mutually exclusive; `--write` requires files.
+
+All selected files are parsed, formatted, and verified before emitting a diff
+or writing anything. Writes use temporary files in the destination directory,
+preserve file permissions and the selected encoding, and atomically replace each
+changed file. Unchanged files are not rewritten. Read-only files and hard links
+(on Unix) are rejected when replacement is needed; concurrent content changes
+are checked before replacement. A batch is not a filesystem transaction: an
+I/O failure during the replacement phase can leave earlier files updated.
+
+The existing single-file/stdin stdout modes retain their exit codes: 0 for
+success, 1 for formatting/parse errors, and 2 for configuration or I/O errors.
 
 The defaults are `max_width = 100`, `indent_width = 4` and
 `keyword_case = lower`. Keyword case supports `lower` and `upper`, including word
@@ -215,7 +254,37 @@ preserves original disabled-region line endings before `Source` normalizes them.
 The CLI uses this raw-text entry point. The lower-level AST-only
 `VHDLFormatter::format_design_file` does not provide source-preservation checks.
 
-**Warning:** `vhdl_ls off/on` disables parsing and language-server analysis of
+### Preserving hand-formatted code
+
+Use exact `-- fmt: off` / `-- fmt: on` comments to preserve a region's spelling,
+spacing, indentation, and line endings. The enclosed code is still parsed,
+validated, and visible to language-server analysis. An unmatched `off` preserves
+the rest of the file; repeated `off` directives do not nest. `on` outside a
+suppressed region has no effect. Exact block comments such as `/* fmt: off */`
+also work. Directives in strings, extended identifiers, or comment prose have
+no effect.
+
+```vhdl
+-- fmt: off
+constant lookup: integer_vector := (0,  1,  4,
+                                   9, 16, 25);
+-- fmt: on
+
+-- fmt: skip
+signal a,b,c : bit;
+
+signal d,e,f : bit; -- fmt: skip
+```
+
+`-- fmt: skip` on its own line preserves the following complete declaration,
+statement, interface item, context clause, or design unit. After an item's final
+token it preserves the preceding item. Compound statements and subprogram bodies
+are preserved in full, including their internal semicolons. Unsupported skip
+placements are errors rather than silently choosing a partial expression.
+Suppression preserves layout, not invalid syntax: malformed VHDL still fails
+formatting, and the complete restored output undergoes preservation checks.
+
+**Legacy analysis suppression:** `vhdl_ls off/on` disables parsing and language-server analysis of
 the enclosed text as well as formatting. It is not a formatter-only ignore
 mechanism; declarations and references in that region are invisible to analysis.
 

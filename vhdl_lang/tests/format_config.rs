@@ -107,7 +107,12 @@ fn argument_limit_is_loaded_and_overridden_for_both_input_modes() {
         }
     }
     formatter()
-        .args(["--format-stdin", "--inline-argument-limit", "10001"])
+        .args([
+            "--format-stdin",
+            "--no-format-config",
+            "--inline-argument-limit",
+            "10001",
+        ])
         .write_stdin(input)
         .assert()
         .code(2)
@@ -301,6 +306,7 @@ fn project_standard_is_used_and_can_be_overridden() {
 #[test]
 fn relative_parent_paths_do_not_discover_the_wrong_project() {
     let root = TempDir::new().unwrap();
+    fs::write(root.path().join("vhdl_ls.toml"), "[format]\n").unwrap();
     fs::create_dir(root.path().join("first")).unwrap();
     fs::create_dir(root.path().join("second")).unwrap();
     fs::write(root.path().join("first/vhdl_ls.toml"), SETTINGS).unwrap();

@@ -269,6 +269,15 @@ synthetic RTL fixtures cover processes, instantiations and generate structures.
 
 ## Performance and editor smoke test
 
+`format_suppression.rs` checks formatter-only `fmt: off/on` and `fmt: skip`,
+including CRLF preservation, compound statements, parser visibility, malformed
+input, and suppression at token gaps. Restored output is reparsed and verified.
+`format_repository.rs` covers recursive discovery, exclusions, duplicate paths,
+per-file configuration, check/diff exit codes, stdin, atomic writes, permissions,
+Latin-1 output, link handling, and batches containing invalid input. CLI tests
+disable configuration discovery except when using their own temporary projects;
+they do not depend on personal `vhdl_ls.toml` files.
+
 ```sh
 cargo bench -p vhdl_lang --bench formatter
 python3 vhdl_lang/benches/compare_formatter.py BASELINE_BINARY CURRENT_BINARY
