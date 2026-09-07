@@ -237,7 +237,7 @@ fn context_separation_covers_all_design_units_but_not_context_bodies() {
         let source = format!("library lib; use lib.pkg.all;\n-- unit docs\n{unit}");
         let output = checked(&source, FormatConfig::default());
         assert!(
-            output.starts_with("library lib;\n\nuse lib.pkg.all;\n\n-- unit docs\n"),
+            output.starts_with("library lib;\n    use lib.pkg.all;\n\n-- unit docs\n"),
             "{output}"
         );
     }
@@ -247,8 +247,26 @@ fn context_separation_covers_all_design_units_but_not_context_bodies() {
     );
     assert_eq!(
         context,
-        "context c is\n    library lib;\n    use lib.pkg.all;\nend context;\n"
+        "context c is\n    library lib;\n        use lib.pkg.all;\nend context;\n"
     );
+}
+
+#[test]
+fn library_groups_indent_use_and_context_clauses_with_the_configured_width() {
+    let input = "use work.prelude.all; library ieee;\n\n-- imports\nuse ieee.std_logic_1164.all;\n\ncontext ieee.common; library other; use other.pkg.all; entity e is end;";
+    for indent_width in [0, 2, 4] {
+        let indent = " ".repeat(indent_width);
+        let output = checked(
+            input,
+            FormatConfig {
+                indent_width,
+                ..FormatConfig::default()
+            },
+        );
+        assert_eq!(output, format!(
+            "use work.prelude.all;\n\nlibrary ieee;\n{indent}-- imports\n{indent}use ieee.std_logic_1164.all;\n{indent}context ieee.common;\n\nlibrary other;\n{indent}use other.pkg.all;\n\nentity e is\nend;\n"
+        ));
+    }
 }
 
 #[test]

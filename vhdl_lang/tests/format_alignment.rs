@@ -306,7 +306,7 @@ fn context_items_are_grouped_without_reordering() {
     let output = checked(input, FormatConfig::default());
     assert!(
         output.starts_with(
-            "library IEEE, XESS;\n\nuse IEEE.std_logic_1164.all;\nuse IEEE.numeric_std.all;\nuse IEEE.std_logic_arith.all;\nuse IEEE.MATH_REAL.all;\n\nuse XESS.CommonPckg.all;\nuse XESS.AudioPckg.all;\n\nentity e is"
+            "library IEEE, XESS;\n    use IEEE.std_logic_1164.all;\n    use IEEE.numeric_std.all;\n    use IEEE.std_logic_arith.all;\n    use IEEE.MATH_REAL.all;\n    use XESS.CommonPckg.all;\n    use XESS.AudioPckg.all;\n\nentity e is"
         ),
         "{output}"
     );

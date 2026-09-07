@@ -159,18 +159,20 @@ Rows that cannot fit split a run so they do not widen otherwise-related
 neighbors. Inline lists never receive column padding, and alignment always falls
 back to ordinary spacing rather than forcing code past `max_width`.
 
-Context clauses retain their token order. A blank line separates library clauses
-from use clauses, and consecutive use clauses are visually grouped by their
-leading library name:
+Context clauses retain their token order. Following `use` and `context` clauses
+are indented one level beneath a `library` clause, without intervening blank
+lines. A new library group starts at the original indentation level, separated
+by a blank line. The same layout applies inside context declarations; clauses
+without a preceding library stay at the surrounding indentation level.
 
 ```vhdl
-library IEEE, XESS;
+library IEEE;
+    use IEEE.std_logic_1164.all;
+    use IEEE.numeric_std.all;
 
-use IEEE.std_logic_1164.all;
-use IEEE.numeric_std.all;
-
-use XESS.CommonPckg.all;
-use XESS.AudioPckg.all;
+library XESS;
+    use XESS.CommonPckg.all;
+    context XESS.AudioContext;
 ```
 
 Expressions prefer breaks between logical operands over breaks inside their

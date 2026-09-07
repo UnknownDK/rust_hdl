@@ -132,9 +132,10 @@ variable `:=` share a column when they occur in the same sequential run.
 ## Structural spacing
 
 Context clauses are separated from their design unit by one blank line. Library
-clauses are separated from following use clauses, and adjacent use clauses with
-different leading library names form separate visual groups without being
-reordered. Context declaration bodies retain ordinary spacing. A process is
+clauses introduce groups: following use clauses and context references are
+indented one level without blank lines between them. New library groups are
+separated by a blank line, without reordering any items. The same grouping is
+used within context declaration bodies. A process is
 separated from each neighboring concurrent statement, and a subprogram body
 from each neighboring declaration, by one blank line. No extra blank line is
 added at list edges. Existing declaration groups are preserved, multiple empty
