@@ -181,8 +181,8 @@ end context ident;",
             "\
 context ident is
     library foo;
-    use foo.bar;
-    context foo.ctx;
+        use foo.bar;
+        context foo.ctx;
 end context;",
         );
     }
@@ -200,7 +200,7 @@ end context;",
 
     #[test]
     fn design_unit_context_clause_has_one_blank_line() {
-        let expected = "library lib;\n\nuse lib.foo.all;\n\npackage pkg_name is\nend package;";
+        let expected = "library lib;\n    use lib.foo.all;\n\npackage pkg_name is\nend package;";
         for separator in ["\n", "\n\n", "\n\n\n\n"] {
             let input = format!(
                 "library lib;\nuse lib.foo.all;{separator}package pkg_name is\nend package;"
@@ -230,16 +230,13 @@ end package body;",
         check_design_unit_formatted(
             "\
 library ieee;
-
-use ieee.std_logic_1164.all;
-use ieee.std_logic_unsigned.all;
-use ieee.std_logic_arith.all;
+    use ieee.std_logic_1164.all;
+    use ieee.std_logic_unsigned.all;
+    use ieee.std_logic_arith.all;
 
 library third_party;
-
-use third_party.baz;
-
-use work.foo.bar;
+    use third_party.baz;
+    use work.foo.bar;
 
 package body foo is
 end package body;",
@@ -256,8 +253,7 @@ library ieee;
 -- This is another comment
 -- Third comment
 library third_party;
-
-use third_party.baz;
+    use third_party.baz;
 
 package body foo is
 end package body;",
@@ -273,8 +269,7 @@ end package body;",
 -- This ine appears later
 -- Third comment
 library third_party;
-
-use third_party.baz;
+    use third_party.baz;
 
 package body foo is
 end package body;",

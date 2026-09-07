@@ -1,6 +1,5 @@
 library ieee;
-
-use ieee.std_logic_1164.all;
+    use ieee.std_logic_1164.all;
 
 entity pipeline_stage is
     generic (DATA_WIDTH : positive := 32; REGISTER_OUTPUT : boolean := true);
