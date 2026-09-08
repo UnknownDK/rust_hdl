@@ -15,7 +15,7 @@ impl Parser {
         self.node(NodeKind::ConfigurationDeclaration, |p| {
             p.configuration_declaration_preamble();
             p.configuration_declarative_part();
-            if p.next_is(Keyword(Kw::Use)) && p.next_nth_is(Keyword(Kw::Vunit), 1) {
+            while p.next_is(Keyword(Kw::Use)) && p.next_nth_is(Keyword(Kw::Vunit), 1) {
                 p.node(NodeKind::VerificationUnitBinding, |p| {
                     p.verification_unit_binding_indication();
                     p.expect_token(SemiColon);
@@ -181,15 +181,20 @@ impl Parser {
     }
 
     fn component_configuration_known_spec(&mut self) {
-        if self.next_is_one_of([Keyword(Kw::Use), Keyword(Kw::Generic), Keyword(Kw::Port)])
-            && !self.next_nth_is(Keyword(Kw::Vunit), 1)
+        // surprisingly, a `;` is a legal `binding`
+        if self.next_is_one_of([
+            Keyword(Kw::Use),
+            Keyword(Kw::Generic),
+            Keyword(Kw::Port),
+            SemiColon,
+        ]) && !self.next_nth_is(Keyword(Kw::Vunit), 1)
         {
             self.node(NodeKind::Binding, |p| {
                 p.binding_indication();
                 p.expect_token(TokenKind::SemiColon);
             });
         }
-        if self.next_is(Keyword(Kw::Use)) && self.next_nth_is(Keyword(Kw::Vunit), 1) {
+        while self.next_is(Keyword(Kw::Use)) && self.next_nth_is(Keyword(Kw::Vunit), 1) {
             self.node(NodeKind::VerificationUnitBinding, |p| {
                 p.verification_unit_binding_indication();
                 p.expect_token(SemiColon);
@@ -399,6 +404,44 @@ end configuration cfg;",
         insta::assert_snapshot!(to_test_text(
             Parser::configuration_specification,
             "for all : lib.pkg.comp use entity work.foo(rtl); use vunit bar, baz; end for;",
+        ));
+    }
+
+    #[test]
+    fn configuration_declaration_multiple_vunit_binding_indications() {
+        insta::assert_snapshot!(to_test_text(
+            Parser::configuration_declaration,
+            "\
+configuration cfg of ent is
+    use vunit foo;
+    use vunit bar;
+    for baz
+    end for;
+end configuration cfg ;",
+        ));
+    }
+
+    #[test]
+    fn configuration_with_empty_binding() {
+        insta::assert_snapshot!(to_test_text(
+            Parser::component_configuration,
+            "\
+for i, i : name;
+end for;
+"
+        ));
+    }
+
+    #[test]
+    fn component_configuration_with_multiple_vunit_bindings() {
+        insta::assert_snapshot!(to_test_text(
+            Parser::component_configuration,
+            "\
+for others: name
+    use vunit name;
+    use vunit name;
+end for;
+"
         ));
     }
 
