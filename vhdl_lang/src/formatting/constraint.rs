@@ -27,31 +27,51 @@ impl VHDLFormatter<'_> {
                     self.format_range(range, buffer);
                 });
             }
-            SubtypeConstraint::Array(ranges, opt_constraint) => {
-                self.format_token_id(constraint.span.start_token, buffer);
-                buffer.with_indent(|buffer| {
+            SubtypeConstraint::Array(_, _) => {
+                // Each dimension is a separate group: break between constraints
+                // before breaking the ranges inside an individual constraint.
+                let chained = matches!(&constraint.item, SubtypeConstraint::Array(_, Some(_)));
+                if chained {
+                    buffer.increase_indent();
                     buffer.soft_break(false);
-                    if ranges.is_empty() {
-                        self.format_token_id(constraint.span.start_token + 1, buffer);
-                    }
-                    for range in ranges {
-                        self.format_discrete_range(&range.item, buffer);
-                        if self
-                            .tokens
-                            .get_token(range.span.end_token + 1)
-                            .is_some_and(|token| token.kind == Kind::Comma)
-                        {
-                            self.format_token_id(range.span.end_token + 1, buffer);
-                            buffer.soft_line();
-                        }
-                    }
-                });
-                buffer.soft_break(false);
-                if let Some(constraint) = opt_constraint {
-                    self.format_token_id(constraint.span.start_token - 1, buffer);
-                    self.format_subtype_constraint(constraint, buffer);
-                } else {
-                    self.format_token_id(constraint.span.end_token, buffer);
+                }
+                let mut current = constraint;
+                loop {
+                    let SubtypeConstraint::Array(ranges, next) = &current.item else {
+                        self.format_subtype_constraint(current, buffer);
+                        break;
+                    };
+                    buffer.expression_group(|buffer| {
+                        self.format_token_id(current.span.start_token, buffer);
+                        buffer.with_indent(|buffer| {
+                            buffer.soft_break(false);
+                            if ranges.is_empty() {
+                                self.format_token_id(current.span.start_token + 1, buffer);
+                            }
+                            for range in ranges {
+                                self.format_discrete_range(&range.item, buffer);
+                                if self
+                                    .tokens
+                                    .get_token(range.span.end_token + 1)
+                                    .is_some_and(|token| token.kind == Kind::Comma)
+                                {
+                                    self.format_token_id(range.span.end_token + 1, buffer);
+                                    buffer.soft_line();
+                                }
+                            }
+                        });
+                        buffer.soft_break(false);
+                        let close = next
+                            .as_ref()
+                            .map_or(current.span.end_token, |next| next.span.start_token - 1);
+                        self.format_token_id(close, buffer);
+                    });
+                    let Some(next) = next else { break };
+                    buffer.soft_break(false);
+                    current = next;
+                }
+                if chained {
+                    buffer.decrease_indent();
                 }
             }
             SubtypeConstraint::Record(records) => {

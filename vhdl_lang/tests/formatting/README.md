@@ -42,6 +42,11 @@ is preferred to splitting its range. Otherwise the existing internal breaks are
 used. Defaults remain separate groups, so a long default does not unnecessarily
 expand a short type. No child document is rendered during this decision.
 
+Chained array constraints stay inline when the complete type fits. Otherwise,
+parenthesized constraints wrap onto separate lines one level below the type's
+line, keeping each dimension intact when possible. An individual constraint
+expands internally only when its own ranges or comments require it.
+
 Attribute declarations wrap before their type; expanded specifications break
 after `of` and `is`, with independent wrapping of the entity/class clause and
 value. Aliases group breaks before their subtype and target, retaining complete

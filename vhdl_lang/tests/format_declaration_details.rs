@@ -305,3 +305,47 @@ fn syntax_versions_and_disabled_regions_are_preserved() {
     let source = format!("package p is\n{raw}attribute flag: boolean; end;");
     assert!(checked(&source, config(40)).contains(raw));
 }
+
+#[test]
+fn chained_array_constraints_keep_complete_dimensions_together() {
+    let source = "package p is signal samples: complex_sample_t(0 to 4)(0 to 8)(0 to 16); end;";
+    let inline = checked(source, config(100));
+    assert!(
+        inline.contains("signal samples : complex_sample_t(0 to 4)(0 to 8)(0 to 16);"),
+        "{inline}"
+    );
+    let moved = checked(source, config(60));
+    assert!(
+        moved.contains("signal samples :\n        complex_sample_t(0 to 4)(0 to 8)(0 to 16);"),
+        "{moved}"
+    );
+    let wrapped = checked(source, config(40));
+    assert!(wrapped.contains("signal samples : complex_sample_t\n        (0 to 4)\n        (0 to 8)\n        (0 to 16);"), "{wrapped}");
+    assert_width(&wrapped, 40);
+
+    let source = "package p is signal samples: complex_sample_t(0 to CHANNEL_COUNT - 1)(0 to SAMPLE_COUNT - 1)(0 to COMPONENT_COUNT - 1); end;";
+    let wrapped = checked(source, config(60));
+    assert!(wrapped.contains("complex_sample_t\n        (0 to CHANNEL_COUNT - 1)\n        (0 to SAMPLE_COUNT - 1)\n        (0 to COMPONENT_COUNT - 1);"), "{wrapped}");
+    assert_width(&wrapped, 60);
+}
+
+#[test]
+fn chained_constraints_preserve_comments_and_nested_ranges() {
+    let source = "package p is subtype samples is complex_sample_t(0 to CHANNELS - 1, 0 to 4)(open)(0 to SAMPLES - 1); signal data: complex_sample_t(0 to 4) -- channels\n(0 to 8)(0 to 16); subtype records is record_array_t(0 to 4)(payload(0 to 8)); end; entity e is port(data: in complex_sample_t(0 to 4)(0 to 8)(0 to 16)); end;";
+    for max_width in [32, 40, 60, 100] {
+        for indent_width in [0, 2, 4] {
+            for keyword_case in [KeywordCase::Lower, KeywordCase::Upper] {
+                let output = checked(
+                    source,
+                    FormatConfig {
+                        max_width,
+                        indent_width,
+                        keyword_case,
+                        ..config(max_width)
+                    },
+                );
+                assert_width(&output, max_width);
+            }
+        }
+    }
+}
