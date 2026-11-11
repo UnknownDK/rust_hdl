@@ -127,33 +127,6 @@ fn comments_at_every_call_break_remain_anchored() {
 }
 
 #[test]
-#[ignore = "`vhdl_ls off` regions are not supported"]
-fn disabled_regions_are_lossless_and_enabled_sections_are_formatted() {
-    let raw = "  -- vhdl_ls off\ninvalid € VHDL \"   \n  -- vhdl_ls on\n";
-    let input = format!("ENTITY Foo IS\n{raw}END ENTITY;\n");
-    let output = checked(
-        &input,
-        FormatConfig {
-            keyword_case: KeywordCase::Upper,
-            ..config(40)
-        },
-        VHDLStandard::VHDL2008,
-    );
-    assert_eq!(output, format!("ENTITY Foo IS\n{raw}END ENTITY;\n"));
-    let output = checked(&input, config(40), VHDLStandard::VHDL2008);
-    assert_eq!(output, format!("entity Foo is\n{raw}end entity;\n"));
-    for source in [
-        "ENTITY Foo IS END;\n--vhdl_ls off\ninvalid, without an on marker",
-        "--vhdl_ls off\nanything\n--vhdl_ls on\nENTITY Foo IS END;",
-        "ENTITY Foo IS\n--vhdl_ls off\n--vhdl_ls on\nEND;",
-        "ENTITY Foo IS --vhdl_ls off\nanything\n--vhdl_ls on\nEND;",
-        "ENTITY Foo IS\n/* vhdl_ls off */\nanything\n/* vhdl_ls on */\nEND;",
-    ] {
-        checked(source, config(40), VHDLStandard::VHDL2008);
-    }
-}
-
-#[test]
 fn whitespace_variants_are_canonical_across_standards_and_options() {
     let tokens = [
         "entity",

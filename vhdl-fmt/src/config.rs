@@ -38,6 +38,11 @@ pub struct FormatConfig {
     pub align_associations: bool,
     /// Align the operators of adjacent unlabeled assignments.
     pub align_assignments: bool,
+    /// Line up the comments that end neighbouring lines of code.
+    pub align_comments: bool,
+    /// Write `name : type` in declarations, not `name: type`. The colon of a
+    /// label is never preceded by a space.
+    pub space_before_colon: bool,
     /// Most entries a call, map, interface list or named aggregate may have
     /// and still stay on one line. Zero always expands them.
     pub inline_argument_limit: usize,
@@ -52,6 +57,8 @@ impl Default for FormatConfig {
             align_declarations: false,
             align_associations: false,
             align_assignments: false,
+            align_comments: false,
+            space_before_colon: false,
             inline_argument_limit: 2,
         }
     }

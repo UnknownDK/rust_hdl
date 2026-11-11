@@ -28,8 +28,13 @@ pub fn format_text_with_config(
     text: &str,
     config: &FormatConfig,
 ) -> Result<String, FormatError> {
+    // The tests were written when aligning declarations implied a space
+    // before their colon.
     let settings = Settings {
-        format: *config,
+        format: FormatConfig {
+            space_before_colon: config.align_declarations,
+            ..*config
+        },
         standard: parser.standard,
     };
     vhdl_fmt::format(text.as_bytes(), &settings)

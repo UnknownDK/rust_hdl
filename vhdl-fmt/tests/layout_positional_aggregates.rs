@@ -194,16 +194,3 @@ fn compatible_aggregates_match_across_language_versions() {
         assert_eq!(checked_standard(source, config, standard), expected);
     }
 }
-
-#[test]
-#[ignore = "`vhdl_ls off` regions are not supported"]
-fn disabled_aggregates_remain_verbatim() {
-    let raw = "-- vhdl_ls off\n  constant raw : values_t := ( 1.0,2.0,  3.0 );\n-- vhdl_ls on\n";
-    let source = format!("package p is type values_t is array (natural range <>) of real;\n{raw}constant table: values_t := (-10.0, -9.0, -8.0, -7.0, -6.0); end;");
-    let output = checked(&source, config(40));
-    assert!(output.contains(raw), "{output}");
-    assert!(
-        output.contains("constant table: values_t := (\n"),
-        "{output}"
-    );
-}

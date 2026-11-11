@@ -16,7 +16,9 @@
         "align_declarations": { "type": "boolean", "default": false, "description": "Align columns in adjacent object/interface declarations and record fields." },
         "align_associations": { "type": "boolean", "default": false, "description": "Align arrows in expanded named maps and aggregates." },
         "align_assignments": { "type": "boolean", "default": false, "description": "Align operators in adjacent simple signal and variable assignments." },
-        "inline_argument_limit": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 2, "description": "Maximum items kept inline when they fit in calls, interfaces, maps and aggregates containing named associations. Purely positional aggregates remain width-driven." }
+        "align_comments": { "type": "boolean", "default": false, "description": "Line up the comments that end neighbouring lines of code." },
+        "space_before_colon": { "type": "boolean", "default": false, "description": "Write 'name : type' in declarations instead of 'name: type'. Labels are not affected." },
+        "inline_argument_limit": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 2, "description": "Maximum entries kept on one line, when they fit, in interface lists, maps and named aggregates. Calls and positional aggregates are limited by the line width alone." }
       }
     },
     "preferred_case": {

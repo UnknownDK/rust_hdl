@@ -205,25 +205,6 @@ fn waveform_width_boundary_reserves_semicolon() {
 }
 
 #[test]
-#[ignore = "`vhdl_ls off` regions are not supported"]
-fn disabled_types_and_waveforms_remain_verbatim() {
-    let disabled = "-- vhdl_ls off\n  type untouched is ( AA , BB , CC );\n-- vhdl_ls on\n";
-    let source = format!(
-        "package p is\n{disabled}type state_t is (FIRST_STATE, SECOND_STATE, THIRD_STATE); end;"
-    );
-    let output = checked(&source, config(40));
-    assert!(output.contains(disabled), "{output}");
-    assert!(output.contains("type state_t is (\n"), "{output}");
-    let disabled = "-- vhdl_ls off\n  x<= a after 1 ns,b after 2 ns;\n-- vhdl_ls on\n";
-    let output = checked(
-        &architecture(&format!("\n{disabled}x <= '1' after 10 ns;")),
-        config(40),
-    );
-    assert!(output.contains(disabled), "{output}");
-    assert!(output.contains("x <= '1' after 10 ns;"), "{output}");
-}
-
-#[test]
 fn selected_and_conditional_waveforms_keep_timing_and_modifiers() {
     let body = "with mode select output_signal <= transport first_long_value after first_long_delay when 0, unaffected when others; output_signal <= reject 1 ns inertial first_long_value after first_long_delay when enabled else second_long_value after second_long_delay;";
     for body in [

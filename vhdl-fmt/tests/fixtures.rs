@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this file,
 // You can obtain one at http://mozilla.org/MPL/2.0/.
 
-//! Reviewed layouts, carried over from the `vhdl_lang` formatter. The only
-//! expectation that changed is `positional_aggregates`, where a call is no
-//! longer expanded just for having more than two arguments.
+//! Reviewed layouts, carried over from the `vhdl_lang` formatter. Two
+//! expectations changed: in `positional_aggregates` a call is no longer
+//! expanded just for having more than two arguments, and in
+//! `declaration_details` the space before a colon also applies to aliases and
+//! attributes.
 
 use vhdl_fmt::{format, FormatConfig, Settings};
 
@@ -59,6 +61,7 @@ fn alignment() {
         "alignment_rtl",
         FormatConfig {
             align_declarations: true,
+            space_before_colon: true,
             align_associations: true,
             align_assignments: true,
             ..FormatConfig::default()
@@ -79,6 +82,7 @@ fn wrapping() {
         "layout_consistency",
         FormatConfig {
             align_declarations: true,
+            space_before_colon: true,
             ..width(60)
         }
     );
@@ -86,6 +90,7 @@ fn wrapping() {
         "declaration_details",
         FormatConfig {
             align_declarations: true,
+            space_before_colon: true,
             align_associations: true,
             ..width(60)
         }

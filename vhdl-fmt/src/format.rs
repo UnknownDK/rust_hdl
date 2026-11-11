@@ -293,11 +293,31 @@ fn is_assignment(kind: NodeKind) -> bool {
     )
 }
 
+/// Declarations whose colon follows the `space_before_colon` setting. The
+/// colon of a label never has a space before it.
+fn is_declaration_colon(parent: NodeKind) -> bool {
+    use NodeKind::*;
+    matches!(
+        parent,
+        ConstantDeclaration
+            | SignalDeclaration
+            | VariableDeclaration
+            | FileDeclaration
+            | ElementDeclaration
+            | InterfaceObjectDeclaration
+            | InterfaceFileDeclaration
+            | AliasSubtype
+            | AttributeDeclaration
+            | EntitySpecification
+    )
+}
+
 /// A line break requested by a rule before the next token.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Break {
-    /// A new line (1) or a blank line (2).
-    Hard(usize),
+    /// A new line (1) or a blank line (2). Where the line is, in its block,
+    /// decides whether a blank line of the source is kept.
+    Hard(usize, Edge),
     /// A break that is taken only if the enclosing group does not fit on one
     /// line. Otherwise it is a space, or nothing.
     Soft { space: bool },
@@ -305,6 +325,69 @@ enum Break {
     /// a line of its own, it moves there whole before it is broken up.
     Preferred,
 }
+
+/// The position of a line in the block that holds it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Edge {
+    /// Between two declarations or statements: a blank line above is kept.
+    Inside,
+    /// First in the block: no blank line above.
+    First,
+    /// Closes the block or one of its parts, like `begin`, `else` or `end`:
+    /// no blank line directly above, but one above a comment is kept.
+    Closing,
+}
+
+/// Names of the predefined attributes. They are not reserved words, but
+/// follow the keyword case like `range` and `subtype`, which are.
+const PREDEFINED_ATTRIBUTES: &[&str] = &[
+    "active",
+    "ascending",
+    "base",
+    "converse",
+    "delayed",
+    "designated_subtype",
+    "driving",
+    "driving_value",
+    "element",
+    "event",
+    "high",
+    "image",
+    "index",
+    "instance_name",
+    "last_active",
+    "last_event",
+    "last_value",
+    "left",
+    "leftof",
+    "length",
+    "low",
+    "path_name",
+    "pos",
+    "pred",
+    "quiet",
+    "reflect",
+    "reverse_range",
+    "right",
+    "rightof",
+    "simple_name",
+    "stable",
+    "succ",
+    "transaction",
+    "val",
+    "value",
+];
+
+/// Whether an identifier after a tick is cased like a keyword.
+pub(crate) fn is_predefined_attribute(name: &[u8]) -> bool {
+    let name = decode(name).to_ascii_lowercase();
+    PREDEFINED_ATTRIBUTES.contains(&name.as_str())
+}
+
+/// Stands for the space before a comment at the end of a line of code until
+/// the lines are rendered and such comments can be lined up. Source text is
+/// decoded from bytes, so it cannot contain this character.
+const COMMENT_GAP: char = '\u{E000}';
 
 /// How the breaks of a group are decided.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -426,12 +509,23 @@ impl<'a> Emitter<'a> {
             }
             _ if is_block(kind) => self.block(node, 1, 1),
             _ if starts_line(kind) => {
-                self.break_line(1);
+                self.break_line_at(1, Edge::Closing);
                 self.inner(node);
             }
             _ if starts_indented_line(kind, parent) => {
+                // The first alternative or clause follows its header directly.
+                let after_header = node
+                    .prev_sibling()
+                    .is_some_and(|previous| format!("{:?}", previous.kind()).ends_with("Preamble"));
+                let edge = if kind == PhysicalTypeDefinitionEpilogue {
+                    Edge::Closing
+                } else if after_header {
+                    Edge::First
+                } else {
+                    Edge::Inside
+                };
                 self.level += 1;
-                self.break_line(1);
+                self.break_line_at(1, edge);
                 self.inner(node);
                 self.level -= 1;
             }
@@ -558,6 +652,7 @@ impl<'a> Emitter<'a> {
         let mut run = Vec::new();
         let level = self.level + indent;
         let mut previous = None;
+        let mut first = true;
         for child in node.children_with_tokens() {
             match child {
                 SyntaxElement::Node(child) if is_transparent(child.kind()) => {
@@ -582,6 +677,9 @@ impl<'a> Emitter<'a> {
                     });
                     let newlines = if separated { 2 } else { newlines };
                     previous = Some(child.kind());
+                    if std::mem::take(&mut first) && indent > 0 {
+                        self.break_line_at(1, Edge::First);
+                    }
                     let row = self.with_targets(targets, |emitter| {
                         emitter.item_node(&child, indent, newlines)
                     });
@@ -654,8 +752,20 @@ impl<'a> Emitter<'a> {
     }
 
     /// The columns of a declaration: its colon and, if it has one, `:=`.
-    fn declaration_targets(item: &SyntaxNode) -> Vec<(usize, usize)> {
-        let colon = Self::direct_token(item, |kind| kind == TokenKind::Colon);
+    ///
+    /// Without a space before the colon, the column starts after it.
+    fn declaration_targets(&self, item: &SyntaxNode) -> Vec<(usize, usize)> {
+        let colon = item
+            .tokens()
+            .find(|token| token.kind() == TokenKind::Colon)
+            .and_then(|colon| {
+                if self.config.space_before_colon {
+                    Some(colon)
+                } else {
+                    colon.next_token()
+                }
+            })
+            .map(|token| token.text_offset());
         let value = Self::first_token_of(item, NodeKind::InitialValue);
         colon
             .map(|colon| (colon, 1))
@@ -674,7 +784,7 @@ impl<'a> Emitter<'a> {
             | ElementDeclaration
                 if self.config.align_declarations =>
             {
-                Self::declaration_targets(item)
+                self.declaration_targets(item)
             }
             SimpleVariableAssignment
             | ConditionalVariableAssignment
@@ -729,7 +839,7 @@ impl<'a> Emitter<'a> {
         };
         match item.kind() {
             InterfaceObjectDeclaration if self.config.align_declarations => {
-                let mut targets = Self::declaration_targets(item);
+                let mut targets = self.declaration_targets(item);
                 // Types line up after the modes only if every entry has one.
                 let all_modes = list
                     .children()
@@ -737,15 +847,14 @@ impl<'a> Emitter<'a> {
                 if let Some(subtype) =
                     Self::first_token_of(item, SubtypeIndication).filter(|_| all_modes)
                 {
-                    targets.insert(1.min(targets.len()), (subtype, 0));
+                    if !targets.iter().any(|(target, _)| *target == subtype) {
+                        targets.insert(1.min(targets.len()), (subtype, 0));
+                    }
                 }
                 targets
             }
             InterfaceFileDeclaration if self.config.align_declarations => {
-                Self::declaration_targets(item)
-                    .into_iter()
-                    .take(1)
-                    .collect()
+                self.declaration_targets(item).into_iter().take(1).collect()
             }
             AssociationElement
                 if self.config.align_associations
@@ -968,7 +1077,7 @@ impl<'a> Emitter<'a> {
                     let expanded =
                         count.is_some_and(|count| count > self.config.inline_argument_limit);
                     if expanded {
-                        self.pending = Some(Break::Hard(1));
+                        self.pending = Some(Break::Hard(1, Edge::Inside));
                     }
                     let parent = node.kind();
                     let mut run = Vec::new();
@@ -998,7 +1107,7 @@ impl<'a> Emitter<'a> {
                                             Some(Break::Soft { space: true })
                                         )
                                     {
-                                        emitter.pending = Some(Break::Hard(2));
+                                        emitter.pending = Some(Break::Hard(2, Edge::Inside));
                                     }
                                     let row = emitter.with_targets(targets, |emitter| {
                                         emitter.grouped(Shape::Fill, |emitter| emitter.node(&item))
@@ -1411,17 +1520,24 @@ impl<'a> Emitter<'a> {
     /// Request a new line before the next token; `newlines` is 2 for a blank
     /// line.
     fn break_line(&mut self, newlines: usize) {
-        let newlines = match self.pending {
-            Some(Break::Hard(pending)) => pending.max(newlines),
-            _ => newlines,
+        self.break_line_at(newlines, Edge::Inside);
+    }
+
+    fn break_line_at(&mut self, newlines: usize, edge: Edge) {
+        let (newlines, edge) = match self.pending {
+            Some(Break::Hard(pending, first)) => (
+                pending.max(newlines),
+                if edge == Edge::Inside { first } else { edge },
+            ),
+            _ => (newlines, edge),
         };
-        self.pending = Some(Break::Hard(newlines));
+        self.pending = Some(Break::Hard(newlines, edge));
     }
 
     /// Allow a line break before the next token.
     fn soft_break(&mut self, space: bool) {
         self.break_inside_group = 0;
-        if !matches!(self.pending, Some(Break::Hard(_))) {
+        if !matches!(self.pending, Some(Break::Hard(..))) {
             self.pending = Some(Break::Soft { space });
         }
     }
@@ -1477,12 +1593,25 @@ impl<'a> Emitter<'a> {
                         token.kind(),
                     ) || requires_separator(previous.token(), token.token(), self.standard)
                 })
-                || (self.spaced_colon > 0 && token.kind() == TokenKind::Colon);
-            let text = match (verbatim, token.kind(), self.config.keyword_case) {
+                || (token.kind() == TokenKind::Colon
+                    && (self.spaced_colon > 0
+                        || (self.config.space_before_colon
+                            && is_declaration_colon(token.parent().kind()))));
+            let cased = match token.kind() {
+                TokenKind::Keyword(_) => true,
+                TokenKind::Identifier => {
+                    self.previous
+                        .as_ref()
+                        .is_some_and(|previous| previous.kind() == TokenKind::Tick)
+                        && is_predefined_attribute(token.text().as_bytes())
+                }
+                _ => false,
+            };
+            let text = match (verbatim, cased, self.config.keyword_case) {
                 (Some(verbatim), ..) => verbatim,
-                (None, TokenKind::Keyword(_), KeywordCase::Lower) => text.to_ascii_lowercase(),
-                (None, TokenKind::Keyword(_), KeywordCase::Upper) => text.to_ascii_uppercase(),
-                (None, ..) => text,
+                (None, true, KeywordCase::Lower) => text.to_ascii_lowercase(),
+                (None, true, KeywordCase::Upper) => text.to_ascii_uppercase(),
+                (None, false, _) => text,
             };
             let offset = token.text_offset();
             self.align = self
@@ -1578,13 +1707,18 @@ impl<'a> Emitter<'a> {
         let is_comment = deeper_comment.is_some();
         // Between declarations and statements the source decides about blank
         // lines. Elsewhere only a comment on its own line keeps its break.
-        let between_items = forced
-            .as_ref()
-            .is_some_and(|forced| matches!(forced.kind, Break::Hard(_)));
-        let source_newlines = match (between_items, is_comment) {
-            (true, _) => gap.newlines,
-            (false, true) => gap.newlines.min(1),
-            (false, false) => 0,
+        let edge = forced.as_ref().and_then(|forced| match forced.kind {
+            Break::Hard(_, edge) => Some((edge, forced.done)),
+            _ => None,
+        });
+        let source_newlines = match (edge, is_comment) {
+            // No blank line opens a block, or sits directly above its end.
+            (Some((Edge::First, false)), _) | (Some((Edge::Closing, _)), false) => {
+                gap.newlines.min(1)
+            }
+            (Some(_), _) => gap.newlines,
+            (None, true) => gap.newlines.min(1),
+            (None, false) => 0,
         };
         let mut newlines = source_newlines.max(usize::from(self.after_closing_comment));
         // A comment on the line of the previous token stays there; the
@@ -1594,7 +1728,7 @@ impl<'a> Emitter<'a> {
         if let Some(forced) = forced.as_mut().filter(|_| !trails_previous) {
             if !forced.done {
                 match forced.kind {
-                    Break::Hard(count) => newlines = newlines.max(count),
+                    Break::Hard(count, _) => newlines = newlines.max(count),
                     // After a comment on the same line, a space is needed.
                     Break::Soft { space } => {
                         soft = Some(Doc::soft_line(space || self.after_comment))
@@ -1633,14 +1767,21 @@ impl<'a> Emitter<'a> {
                     }
                 }
             }
+            let soft_taken = soft.is_some();
+            // The gap before a comment that ends a line of code is decided
+            // once the lines are known.
+            let ends_code_line = is_comment && text.starts_with("--");
             match soft {
                 Some(soft) => self.docs.push(soft),
+                None if ends_code_line => self.docs.push(Doc::text(COMMENT_GAP.to_string())),
                 None if space && align.is_none_or(|spaces| spaces == 0) => {
                     self.docs.push(Doc::space())
                 }
                 None => {}
             }
             if let Some(spaces) = align {
+                // A break before the column already is a space when not taken.
+                let spaces = if soft_taken { 0 } else { spaces };
                 self.docs.push(Doc::align(spaces));
             }
             self.open_deferred_groups(is_comment);
@@ -1664,10 +1805,62 @@ impl<'a> Emitter<'a> {
         }
         let rendered =
             layout::render_docs(&self.docs, self.config.indent_width, self.config.max_width);
-        let mut output = rendered.trim_end().replace("\r\n", "\n");
+        let rendered = rendered.trim_end().replace("\r\n", "\n");
+        let mut output = self.place_comments(&rendered);
         if !output.is_empty() {
             output.push('\n');
         }
+        output
+    }
+
+    /// Put one space before each comment that ends a line of code or, with
+    /// `align_comments`, line such comments up on neighbouring lines of the
+    /// same indentation. A run is left alone if lining it up would push a
+    /// line over the width.
+    fn place_comments(&self, rendered: &str) -> String {
+        let width = |text: &str| text.chars().count();
+        let split = |line: &str| -> Option<(String, String)> {
+            line.split_once(COMMENT_GAP)
+                .map(|(code, comment)| (code.to_owned(), comment.to_owned()))
+        };
+        let indent = |line: &str| line.len() - line.trim_start_matches(' ').len();
+        let lines: Vec<&str> = rendered.split('\n').collect();
+        let mut output = String::with_capacity(rendered.len());
+        let mut index = 0;
+        while index < lines.len() {
+            let Some(first) = split(lines[index]) else {
+                output.push_str(lines[index]);
+                output.push('\n');
+                index += 1;
+                continue;
+            };
+            let mut run = vec![first];
+            while self.config.align_comments
+                && index + run.len() < lines.len()
+                && indent(lines[index + run.len()]) == indent(lines[index])
+            {
+                match split(lines[index + run.len()]) {
+                    Some(row) => run.push(row),
+                    None => break,
+                }
+            }
+            let column = run.iter().map(|(code, _)| width(code)).max().unwrap_or(0);
+            let fits = |code: &str, comment: &str, gap: usize| {
+                width(code) + gap + width(comment) <= self.config.max_width
+            };
+            let aligned = run.iter().all(|(code, comment)| {
+                fits(code, comment, column - width(code) + 1) || !fits(code, comment, 1)
+            });
+            for (code, comment) in &run {
+                let gap = if aligned { column - width(code) + 1 } else { 1 };
+                output.push_str(code);
+                output.extend(std::iter::repeat_n(' ', gap));
+                output.push_str(comment);
+                output.push('\n');
+            }
+            index += run.len();
+        }
+        output.pop();
         output
     }
 }

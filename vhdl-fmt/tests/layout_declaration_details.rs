@@ -60,11 +60,11 @@ fn short_attributes_and_aliases_remain_inline() {
     let source = "package p is attribute flag: boolean; attribute flag of x: signal is true; attribute flag of all: signal is false; attribute flag of others: signal is true; alias word: bit_vector(0 to 7) is data; alias f is original[bit return bit]; end;";
     let output = checked(source, config(100));
     for statement in [
-        "attribute flag: boolean;",
-        "attribute flag of x: signal is true;",
-        "attribute flag of all: signal is false;",
-        "attribute flag of others: signal is true;",
-        "alias word: bit_vector(0 to 7) is data;",
+        "attribute flag : boolean;",
+        "attribute flag of x : signal is true;",
+        "attribute flag of all : signal is false;",
+        "attribute flag of others : signal is true;",
+        "alias word : bit_vector(0 to 7) is data;",
         "alias f is original[bit return bit];",
     ] {
         assert!(output.contains(statement), "{output}");
@@ -93,7 +93,7 @@ fn long_attributes_break_at_clause_boundaries() {
 fn aliases_prefer_complete_types_and_preserve_signatures() {
     let source = "package p is alias received_data_word: std_logic_vector(31 downto 0) is very_long_internal_data_bus(31 downto 0); alias aliased_function is original_function[bit return bit]; end;";
     let output = checked(source, config(60));
-    assert!(output.contains("alias received_data_word:\n        std_logic_vector(31 downto 0) is\n        very_long_internal_data_bus(31 downto 0);"), "{output}");
+    assert!(output.contains("alias received_data_word :\n        std_logic_vector(31 downto 0) is\n        very_long_internal_data_bus(31 downto 0);"), "{output}");
     assert!(
         output.contains("alias aliased_function is\n        original_function[bit return bit];"),
         "{output}"
@@ -283,6 +283,7 @@ fn comment_anchors_and_nested_layouts_are_stable_across_settings() {
                                 align_declarations,
                                 align_associations,
                                 align_assignments: false,
+                                ..FormatConfig::default()
                             },
                         );
                     }
@@ -290,30 +291,6 @@ fn comment_anchors_and_nested_layouts_are_stable_across_settings() {
             }
         }
     }
-}
-
-#[test]
-#[ignore = "`vhdl_ls off` regions are not supported"]
-fn syntax_versions_and_disabled_regions_are_preserved() {
-    let source = "package p is attribute flag: boolean; attribute flag of long_signal_name: signal is true; alias word: bit_vector(0 to 7) is long_data_signal; end;";
-    for standard in [
-        VHDLStandard::VHDL1993,
-        VHDLStandard::VHDL2008,
-        VHDLStandard::VHDL2019,
-    ] {
-        assert_eq!(
-            checked_standard(source, config(40), standard),
-            checked(source, config(40))
-        );
-    }
-    let fixture = include_str!("fixtures/declaration_details.input.vhd");
-    assert_eq!(
-        checked_standard(fixture, config(60), VHDLStandard::VHDL2019),
-        checked(fixture, config(60))
-    );
-    let raw = "-- vhdl_ls off\n  alias raw_name is original ;\n-- vhdl_ls on\n";
-    let source = format!("package p is\n{raw}attribute flag: boolean; end;");
-    assert!(checked(&source, config(40)).contains(raw));
 }
 
 #[test]

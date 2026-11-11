@@ -8,3 +8,5 @@ align_declarations = true
 align_associations = true
 align_assignments = true
 inline_argument_limit = 2
+align_comments = true
+space_before_colon = true

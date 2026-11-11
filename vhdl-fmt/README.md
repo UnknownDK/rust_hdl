@@ -36,26 +36,34 @@ kept.
 - Names declared together, function results, array element types, aliases,
   subtypes and attribute specifications have a break point as well.
 
-A blank line between declarations or statements is kept (at most one), and a
+A blank line between declarations or statements is kept (at most one), but
+not at the start of a block or directly above `begin`, `else` or `end`. A
 comment stays on the line it was written on. Processes and subprogram bodies
 are set apart by a blank line, as is a design unit from its context clause.
-Spacing inside a line, keyword case and trailing whitespace are normalized.
+
+Spacing inside a line and trailing whitespace are normalized. Reserved words
+follow `keyword_case`, and so do the names of predefined attributes such as
+`'length` and `'event`. Declarations are written `name: type`, or `name : type`
+with `space_before_colon`; the colon of a label never has a space before it.
 
 Columns can be aligned on request. Rows are aligned with their neighbours; a
 blank line, a comment line or a row that does not fit on one line ends the run.
 
-- `align_declarations`: the colons of object, record element and interface
-  declarations, their `:=`, and the types after port modes. The colon then has
-  a space on both sides.
+- `align_declarations`: the types of object, record element and interface
+  declarations, their `:=`, and the types after port modes. With
+  `space_before_colon` the colons are lined up as well.
 - `align_associations`: the arrows of generic and port maps and of expanded
   named aggregates.
 - `align_assignments`: the operators of unlabeled assignments.
+- `align_comments`: the comments that end neighbouring lines of the same
+  indentation, unless that would push a line over the width.
 
-With an alignment option on, a blank line between the entries of the aligned
-list is kept and separates the runs.
+With `align_declarations` or `align_associations` on, a blank line between the
+entries of the aligned list is kept and separates the runs.
 
-Not yet ported from `vhdl_lang`: `fmt: skip`. Text without a break point, such
-as a long string or a signature, may exceed the width.
+Text without a break point, such as a long string or a signature, may exceed
+the width. Layouts that are not ported from `vhdl_lang` yet are listed as
+ignored tests in `tests/layout_*.rs`.
 
 `vhdl_syntax` parses VHDL-2008. Files that need VHDL-2019 syntax, such as mode
 views, are rejected with a syntax error.
@@ -78,8 +86,8 @@ failed.
 Each file is configured by the `[format]` table and `standard` key of the
 nearest `vhdl_ls.toml` in its ancestors. `--config FILE` names a project file
 explicitly, `--isolated` ignores project files, and `--max-width`,
-`--indent-width`, `--keyword-case`, `--standard` and the `--align-*` flags
-override them.
+`--indent-width`, `--keyword-case`, `--standard`, `--space-before-colon` and
+the `--align-*` flags override them.
 
 ```toml
 standard = "2008"
@@ -92,9 +100,13 @@ inline_argument_limit = 2 # entries a list may have and stay on one line
 align_declarations = false
 align_associations = false
 align_assignments = false
+align_comments = false
+space_before_colon = false
 ```
 
-Source between `-- fmt: off` and `-- fmt: on` is copied verbatim.
+Source between `-- fmt: off` and `-- fmt: on` is copied verbatim. `-- fmt: skip`
+on the line above a declaration or statement, or at the end of its last line,
+does the same for that one item.
 
 ## Safety
 

@@ -166,7 +166,7 @@ end;
     );
     check(
         "\n\nentity e is   \n\tport (\n      a : in bit\n  );\n\n\n\nend entity;\n\n\n",
-        "entity e is\n    port (a: in bit);\n\nend entity;\n",
+        "entity e is\n    port (a: in bit);\nend entity;\n",
     );
 }
 
@@ -534,6 +534,7 @@ fn columns_are_aligned_on_request() {
     settings.format.align_declarations = true;
     settings.format.align_associations = true;
     settings.format.align_assignments = true;
+    settings.format.space_before_colon = true;
     let output = formatted_with(
         b"entity e is port (clk : in bit; reset_n : in bit;\n\n data_out : out bit := '0'; q : out bit); end;\n\
           architecture a of e is signal state : t := idle; signal next_state_value : t;\n\
@@ -619,5 +620,165 @@ begin
     y <= 2;
 end;
 ",
+    );
+}
+
+#[test]
+fn aligned_declarations_keep_the_configured_colon_spacing() {
+    let mut settings = Settings::default();
+    settings.format.align_declarations = true;
+    let output = formatted_with(
+        b"entity e is port (clk : in bit; reset_n : in bit; q : out bit := '0'); end;\n\
+          architecture a of e is signal s : bit; signal longer : bit := '1'; begin lbl : x <= y; end;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "\
+entity e is
+    port (
+        clk:     in  bit;
+        reset_n: in  bit;
+        q:       out bit := '0'
+    );
+end;
+
+architecture a of e is
+    signal s:      bit;
+    signal longer: bit := '1';
+begin
+    lbl: x <= y;
+end;
+"
+    );
+}
+
+#[test]
+fn a_space_before_the_colon_does_not_need_alignment() {
+    let mut settings = Settings::default();
+    settings.format.space_before_colon = true;
+    let output = formatted_with(
+        b"package p is constant c : t := 1; alias a : bit is s; attribute k : string; \
+          attribute k of s : signal is \"x\"; type r is record f : bit; end record; \
+          procedure q(x : in bit); end;\n\
+          architecture a of e is begin lbl : process begin null; end process; end;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "\
+package p is
+    constant c : t := 1;
+    alias a : bit is s;
+    attribute k : string;
+    attribute k of s : signal is \"x\";
+    type r is record
+        f : bit;
+    end record;
+    procedure q(x : in bit);
+end;
+
+architecture a of e is
+begin
+    lbl: process
+    begin
+        null;
+    end process;
+end;
+"
+    );
+}
+
+#[test]
+fn blank_lines_at_the_edges_of_a_block_are_removed() {
+    check(
+        "entity e is\n\n  port (a : in bit);\n\nend;\narchitecture a of e is\n\n  signal s : bit;\n\n\
+         begin\n\n  p : process is\n\n  begin\n\n    if a then\n\n      x <= 1;\n\n      \
+         -- remark\n\n    else\n\n      -- first\n\n      x <= 2;\n\n    end if;\n\n    \
+         case s is\n\n      when a => null;\n\n      when others => null;\n\n    end case;\n\n  \
+         end process;\n\nend;\n",
+        "\
+entity e is
+    port (a: in bit);
+end;
+
+architecture a of e is
+    signal s: bit;
+begin
+    p: process is
+    begin
+        if a then
+            x <= 1;
+
+            -- remark
+        else
+            -- first
+
+            x <= 2;
+        end if;
+
+        case s is
+            when a =>
+                null;
+
+            when others =>
+                null;
+        end case;
+    end process;
+end;
+",
+    );
+}
+
+#[test]
+fn predefined_attributes_follow_the_keyword_case() {
+    check(
+        "architecture a of e is begin x <= d'LENGTH + d'RANGE'Left + d'My_Attr + T'(Left); end;\n",
+        "architecture a of e is\nbegin\n    x <= d'length + d'range'left + d'My_Attr + T'(Left);\nend;\n",
+    );
+    let mut settings = Settings::default();
+    settings.format.keyword_case = KeywordCase::Upper;
+    let output = formatted_with(
+        b"architecture a of e is begin x <= d'length + d'my_attr + length; end;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "ARCHITECTURE a OF e IS\nBEGIN\n    x <= d'LENGTH + d'my_attr + length;\nEND;\n"
+    );
+}
+
+#[test]
+fn comments_at_line_ends_can_be_lined_up() {
+    let mut settings = Settings::default();
+    settings.format.align_comments = true;
+    settings.format.max_width = 50;
+    let output = formatted_with(
+        b"architecture a of e is\n signal short : bit; -- one\n signal much_longer_name : bit; -- two\n\n \
+          signal other : bit; -- three\n -- on its own line\n signal last : bit; -- four\n\
+          begin\n x <= y; -- a comment that is fairly long\n a_long_target_name <= a_long_source; -- note\n\
+          p : process begin -- deeper\n null; -- five\n end process;\nend;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "\
+architecture a of e is
+    signal short: bit;            -- one
+    signal much_longer_name: bit; -- two
+
+    signal other: bit; -- three
+    -- on its own line
+    signal last: bit; -- four
+begin
+    x <= y; -- a comment that is fairly long
+    a_long_target_name <= a_long_source; -- note
+
+    p: process
+    begin -- deeper
+        null; -- five
+    end process;
+end;
+"
     );
 }

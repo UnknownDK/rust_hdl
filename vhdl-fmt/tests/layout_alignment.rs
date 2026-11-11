@@ -172,15 +172,6 @@ fn padding_falls_back_when_individually_short_rows_cannot_align() {
 }
 
 #[test]
-#[ignore = "`vhdl_ls off` regions are not supported"]
-fn comments_and_disabled_text_remain_exact() {
-    let input = "package P is\nsignal a: bit; -- trailing æ €\n-- vhdl_ls off\n  invalid : => \"  \r\n-- vhdl_ls on\nsignal longer: bit;\nsignal b /* before colon */ : bit;\nend;";
-    let output = checked(input, aligned());
-    assert!(output.contains("-- trailing æ €"));
-    assert!(output.contains("  invalid : => \"  \r\n"));
-}
-
-#[test]
 fn record_fields_and_generic_maps_have_independent_groups() {
     let input = "entity e is generic(size: natural := 8; enable: boolean := true); end; architecture rtl of e is type payload_t is record valid: boolean; data_word: bit_vector(0 to 7);\n\nx: bit; yy: bit; end record; begin u: entity work.e generic map(size => 8, enable => true) port map(a => a, longer_name => open); end;";
     let output = checked(

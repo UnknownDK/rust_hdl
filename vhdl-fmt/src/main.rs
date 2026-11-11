@@ -63,6 +63,14 @@ struct Args {
     #[arg(long)]
     align_assignments: bool,
 
+    /// Line up the comments that end neighbouring lines of code.
+    #[arg(long)]
+    align_comments: bool,
+
+    /// Write `name : type` in declarations, not `name: type`.
+    #[arg(long)]
+    space_before_colon: bool,
+
     /// Preferred line width.
     #[arg(long, value_name = "COLUMNS")]
     max_width: Option<usize>,
@@ -132,6 +140,8 @@ impl Resolver<'_> {
         settings.format.align_declarations |= self.args.align_declarations;
         settings.format.align_associations |= self.args.align_associations;
         settings.format.align_assignments |= self.args.align_assignments;
+        settings.format.align_comments |= self.args.align_comments;
+        settings.format.space_before_colon |= self.args.space_before_colon;
         if let Some(width) = self.args.max_width {
             settings.format.max_width = width;
         }

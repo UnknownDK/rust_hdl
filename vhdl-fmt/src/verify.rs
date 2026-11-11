@@ -5,7 +5,7 @@
 //! Proves that formatting changed nothing but layout: the output must parse
 //! without errors into the same tokens, with the same comments before each.
 
-use crate::format::{comment_text, decode};
+use crate::format::{comment_text, decode, is_predefined_attribute};
 use vhdl_syntax::parser;
 use vhdl_syntax::standard::VHDLStandard;
 use vhdl_syntax::syntax::{SyntaxNode, SyntaxToken};
@@ -42,6 +42,7 @@ pub(crate) fn verify(
     let (formatted, errors) = parser::parse_with_standard(standard, output);
     let mut formatted = formatted.visit_tokens();
     let mut last = 0;
+    let mut after_tick = false;
     for token in input.visit_tokens() {
         let offset = token.text_offset();
         last = offset;
@@ -52,7 +53,14 @@ pub(crate) fn verify(
                 describe(&token)
             )));
         };
-        let same_text = if matches!(token.kind(), TokenKind::Keyword(_)) {
+        // Keywords and predefined attribute names may change case.
+        let cased = match token.kind() {
+            TokenKind::Keyword(_) => true,
+            TokenKind::Identifier => after_tick && is_predefined_attribute(token.text().as_bytes()),
+            _ => false,
+        };
+        after_tick = token.kind() == TokenKind::Tick;
+        let same_text = if cased {
             token.text().eq_ignore_case(other.text())
         } else {
             token.text() == other.text()
