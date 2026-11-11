@@ -374,6 +374,7 @@ fn show_diagnostics_to(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vhdl_lang::Source;
 
     fn parse_errors(file_name: &str, contents: &str) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();

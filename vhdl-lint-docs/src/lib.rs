@@ -264,6 +264,7 @@ mod tests {
                 "# Summary\n\n- [Rules](rules/README.md)\n  {SUMMARY_START}\n  \
                  - [no-parens-around-if](rules/no-parens-around-if.md)\n  \
                  - [explicit-port-mode](rules/explicit-port-mode.md)\n  \
+                 - [explicit-work-library](rules/explicit-work-library.md)\n  \
                  {SUMMARY_END}\n- [After](after.md)\n"
             )
         );
