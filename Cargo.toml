@@ -16,6 +16,7 @@ members = [
     "vhdl-lint",
     "vhdl_lint_macros",
     "vhdl-lint-docs",
+    "vhdl-fmt",
 ]
 
 # By default, do not include members that are only needed at build-time
@@ -26,6 +27,7 @@ default-members = [
     "vhdl_syntax",
     "vhdl-dump-ast",
     "vhdl-lint",
+    "vhdl-fmt",
 ]
 
 [workspace.package]
