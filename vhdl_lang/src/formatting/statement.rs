@@ -17,7 +17,7 @@ impl VHDLFormatter<'_> {
         buffer: &mut Buffer,
     ) {
         if let Some(severity) = &severity {
-            buffer.soft_line();
+            buffer.push_whitespace();
             self.format_token_id(severity.span.start_token - 1, buffer);
             buffer.push_whitespace();
             self.format_expression(severity.as_ref(), buffer);

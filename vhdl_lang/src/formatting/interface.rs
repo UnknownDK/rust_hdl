@@ -14,132 +14,46 @@ use crate::ast::{
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
 use crate::syntax::Kind;
-use crate::{HasTokenSpan, TokenAccess};
+use crate::{indented, HasTokenSpan, TokenAccess};
 use vhdl_lang::ast::token_range::WithTokenSpan;
 use vhdl_lang::ast::{InterfaceFileDeclaration, ModeViewIndication};
 use vhdl_lang::TokenSpan;
 
 impl VHDLFormatter<'_> {
     pub(crate) fn format_interface_list(&self, clause: &InterfaceList, buffer: &mut Buffer) {
-        // A grouped declaration (`a, b, c: natural`) still declares three
-        // arguments. Preserve its token structure while counting each name.
-        let argument_count: usize = clause
-            .items
-            .iter()
-            .map(|item| match item {
-                InterfaceDeclaration::Object(object) => object.idents.len(),
-                InterfaceDeclaration::File(file) => file.idents.len(),
-                _ => 1,
-            })
-            .sum();
-        let multiline = argument_count > buffer.config().inline_argument_limit;
         let span = clause.span;
         let end_token = if self.tokens.index(span.start_token).kind == Kind::LeftPar {
+            // We start with a `(` immediately
+            // applicable for parameters (though VHDL 2008 allows an optional `parameter` keyword)
             span.start_token
         } else {
+            // We start with a `generic`, `port` or `parameter` keyword
             span.start_token + 1
         };
-        buffer.group(|buffer| {
-            self.format_token_span(TokenSpan::new(span.start_token, end_token), buffer);
-            if !clause.items.is_empty() {
-                buffer.with_indent(|buffer| {
-                    if !multiline {
-                        buffer.soft_break(false);
-                    } else {
-                        buffer.line_break();
-                    }
-                    let align = buffer.config().align_declarations;
-                    let align_modes = align
-                        && clause.items.iter().all(|item| {
-                            matches!(item, InterfaceDeclaration::Object(object)
-                                if matches!(&object.mode, ModeIndication::Simple(simple)
-                                    if simple.mode.is_some()))
-                        });
-                    self.format_aligned_items_multi(
-                        &clause.items,
-                        buffer,
-                        (!multiline, true),
-                        |item| {
-                            if align {
-                                match item {
-                                    InterfaceDeclaration::Object(object) => {
-                                        let mut targets = vec![(object.colon_token, 1)];
-                                        if let ModeIndication::Simple(simple) = &object.mode {
-                                            if align_modes {
-                                                let subtype = simple
-                                                    .subtype_indication
-                                                    .resolution
-                                                    .as_ref()
-                                                    .map_or(
-                                                        simple
-                                                            .subtype_indication
-                                                            .type_mark
-                                                            .span
-                                                            .start_token,
-                                                        HasTokenSpan::get_start_token,
-                                                    );
-                                                targets.push((subtype, 0));
-                                            }
-                                            if let Some(expression) = &simple.expression {
-                                                targets.push((expression.span.start_token - 1, 0));
-                                            }
-                                        }
-                                        targets
-                                    }
-                                    InterfaceDeclaration::File(file) => {
-                                        vec![(file.colon_token, 1)]
-                                    }
-                                    _ => Vec::new(),
-                                }
-                            } else {
-                                Vec::new()
-                            }
-                        },
-                        |item| {
-                            let mut span = item.span();
-                            if self
-                                .tokens
-                                .get_token(span.end_token + 1)
-                                .is_some_and(|token| token.kind == Kind::SemiColon)
-                            {
-                                span.end_token += 1;
-                            }
-                            span
-                        },
-                        |i, item, buffer| {
-                            self.format_interface_declaration(item, buffer);
-                            if i < clause.items.len() - 1 {
-                                self.format_token_id(item.get_end_token() + 1, buffer);
-                                if align && multiline {
-                                    self.line_break_preserve_whitespace(
-                                        item.get_end_token() + 1,
-                                        buffer,
-                                    );
-                                } else if multiline {
-                                    buffer.line_break();
-                                } else if align {
-                                    self.soft_line_preserve_blank_line(
-                                        item.get_end_token() + 1,
-                                        buffer,
-                                    );
-                                } else {
-                                    buffer.soft_line();
-                                }
-                            }
-                        },
-                    );
-                });
-                if !multiline {
-                    buffer.soft_break(false);
-                } else {
-                    buffer.line_break();
+        // port (
+        // generic (
+        // parameter (
+        // (
+        self.format_token_span(TokenSpan::new(span.start_token, end_token), buffer);
+        indented!(buffer, {
+            for (i, item) in clause.items.iter().enumerate() {
+                buffer.line_break();
+                self.format_interface_declaration(item, buffer);
+                if i < clause.items.len() - 1 {
+                    self.format_token_id(item.get_end_token() + 1, buffer);
                 }
             }
-            if self.tokens.index(span.end_token).kind == Kind::SemiColon {
-                self.format_token_id(span.end_token - 1, buffer);
-            }
-            self.format_token_id(span.end_token, buffer);
         });
+        if !clause.items.is_empty() {
+            buffer.line_break();
+        }
+        if self.tokens.index(span.end_token).kind == Kind::SemiColon {
+            // );
+            self.format_token_id(span.end_token - 1, buffer);
+            self.format_token_id(span.end_token, buffer);
+        } else {
+            self.format_token_id(span.end_token, buffer);
+        }
     }
 
     pub fn format_map_aspect_span(
@@ -148,76 +62,26 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        let multiline = list.items.len() > buffer.config().inline_argument_limit;
-        buffer.group(|buffer| {
-            self.format_token_span(
-                TokenSpan::new(span.start_token, span.start_token + 2),
-                buffer,
-            );
-            if !list.items.is_empty() {
-                buffer.with_indent(|buffer| {
-                    if multiline {
-                        buffer.line_break();
-                    } else {
-                        buffer.soft_break(false);
-                    }
-                    let align = buffer.config().align_associations;
-                    self.format_aligned_items(
-                        &list.items,
-                        buffer,
-                        !multiline,
-                        |item| {
-                            if align {
-                                item.formal.as_ref().map(|formal| formal.span.end_token + 1)
-                            } else {
-                                None
-                            }
-                        },
-                        |item| {
-                            TokenSpan::new(
-                                item.formal
-                                    .as_ref()
-                                    .map_or(item.actual.span.start_token, |formal| {
-                                        formal.span.start_token
-                                    }),
-                                if self
-                                    .tokens
-                                    .get_token(item.actual.span.end_token + 1)
-                                    .is_some_and(|token| token.kind == Kind::Comma)
-                                {
-                                    item.actual.span.end_token + 1
-                                } else {
-                                    item.actual.span.end_token
-                                },
-                            )
-                        },
-                        |i, item, buffer| {
-                            self.format_association_element(item, buffer);
-                            if let Some(token) = list.tokens.get(i) {
-                                self.format_token_id(*token, buffer);
-                            }
-                            if i + 1 < list.items.len() {
-                                if align && multiline {
-                                    self.line_break_preserve_whitespace(list.tokens[i], buffer);
-                                } else if multiline {
-                                    buffer.line_break();
-                                } else if align {
-                                    self.soft_line_preserve_blank_line(list.tokens[i], buffer);
-                                } else {
-                                    buffer.soft_line();
-                                }
-                            }
-                        },
-                    );
-                });
-                if multiline {
-                    buffer.line_break();
-                } else {
-                    buffer.soft_break(false);
+        // port map (
+        // generic map (
+        self.format_token_span(
+            TokenSpan::new(span.start_token, span.start_token + 2),
+            buffer,
+        );
+        indented!(buffer, {
+            for (i, item) in list.items.iter().enumerate() {
+                buffer.line_break();
+                self.format_association_element(item, buffer);
+                if let Some(token) = list.tokens.get(i) {
+                    self.format_token_id(*token, buffer);
                 }
             }
-            self.format_token_id(span.end_token, buffer);
         });
+        if !list.items.is_empty() {
+            buffer.line_break();
+        }
+        // )
+        self.format_token_id(span.end_token, buffer);
     }
 
     pub fn format_map_aspect(&self, aspect: &MapAspect, buffer: &mut Buffer) {
@@ -225,19 +89,13 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_association_element(&self, element: &AssociationElement, buffer: &mut Buffer) {
-        buffer.fill_group(|buffer| {
-            if let Some(formal) = &element.formal {
-                self.format_name(formal.as_ref(), buffer);
-                buffer.push_whitespace();
-                self.format_token_id(formal.span.end_token + 1, buffer);
-                buffer.with_indent(|buffer| {
-                    buffer.soft_line();
-                    self.format_actual_part(&element.actual, buffer);
-                });
-            } else {
-                self.format_actual_part(&element.actual, buffer);
-            }
-        });
+        if let Some(formal) = &element.formal {
+            self.format_name(formal.as_ref(), buffer);
+            buffer.push_whitespace();
+            self.format_token_id(formal.span.end_token + 1, buffer);
+            buffer.push_whitespace();
+        }
+        self.format_actual_part(&element.actual, buffer)
     }
 
     pub fn format_actual_part(&self, actual_part: &WithTokenSpan<ActualPart>, buffer: &mut Buffer) {
@@ -276,19 +134,12 @@ impl VHDLFormatter<'_> {
         declaration: &InterfaceFileDeclaration,
         buffer: &mut Buffer,
     ) {
-        buffer.fill_group(|buffer| {
-            self.format_token_id(declaration.span.start_token, buffer);
-            buffer.push_whitespace();
-            self.format_ident_list(&declaration.idents, buffer);
-            if buffer.config().align_declarations {
-                buffer.push_whitespace();
-            }
-            self.format_token_id(declaration.colon_token, buffer);
-            buffer.with_indent(|buffer| {
-                buffer.preferred_line();
-                self.format_subtype_indication(&declaration.subtype_indication, buffer);
-            });
-        });
+        self.format_token_id(declaration.span.start_token, buffer);
+        buffer.push_whitespace();
+        self.format_ident_list(&declaration.idents, buffer);
+        self.format_token_id(declaration.colon_token, buffer);
+        buffer.push_whitespace();
+        self.format_subtype_indication(&declaration.subtype_indication, buffer);
     }
 
     pub fn format_interface_subprogram_declaration(
@@ -351,35 +202,21 @@ impl VHDLFormatter<'_> {
         object: &InterfaceObjectDeclaration,
         buffer: &mut Buffer,
     ) {
-        buffer.fill_group(|buffer| {
-            // [signal] my_signal :
-            let first_ident = object.idents[0].tree.token;
-            if object.span.start_token != first_ident {
-                self.format_token_span(
-                    TokenSpan::new(object.span.start_token, first_ident - 1),
-                    buffer,
-                );
-                buffer.push_whitespace();
-                self.format_ident_list(&object.idents, buffer);
-            } else {
-                self.format_declaration_idents(&object.idents, buffer);
-            }
-            if buffer.config().align_declarations {
-                buffer.push_whitespace();
-            }
-            self.format_token_id(object.colon_token, buffer);
-            buffer.with_indent(|buffer| {
-                buffer.preferred_line();
-                self.format_mode(&object.mode, buffer);
-            });
-        });
+        // [signal] my_signal :
+        self.format_token_span(
+            TokenSpan::new(object.span.start_token, object.colon_token - 1),
+            buffer,
+        );
+        self.format_token_id(object.colon_token, buffer);
+        buffer.push_whitespace();
+        self.format_mode(&object.mode, buffer);
     }
 
     pub fn format_mode(&self, mode: &ModeIndication, buffer: &mut Buffer) {
         use ModeIndication::*;
         match mode {
             Simple(simple) => self.format_simple_mode(simple, buffer),
-            View(mode) => buffer.group(|buffer| self.format_mode_view_indication(mode, buffer)),
+            View(mode) => self.format_mode_view_indication(mode, buffer),
         }
     }
 
@@ -437,13 +274,11 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_simple_mode(&self, mode: &SimpleModeIndication, buffer: &mut Buffer) {
-        buffer.group(|buffer| {
-            if let Some(mode) = &mode.mode {
-                self.format_token_id(mode.token, buffer);
-                buffer.push_whitespace();
-            }
-            self.format_subtype_indication(&mode.subtype_indication, buffer);
-        });
+        if let Some(mode) = &mode.mode {
+            self.format_token_id(mode.token, buffer);
+            buffer.push_whitespace();
+        }
+        self.format_subtype_indication(&mode.subtype_indication, buffer);
         self.format_default_expression(mode.expression.as_ref(), buffer);
     }
 }
@@ -543,7 +378,12 @@ mod tests {
 
     #[test]
     fn format_interface_package_declaration() {
-        check_generic("package foo is new lib.pkg generic map (foo => bar)");
+        check_generic(
+            "\
+package foo is new lib.pkg generic map (
+    foo => bar
+)",
+        );
         check_generic("package foo is new lib.pkg generic map (<>)");
         check_generic("package foo is new lib.pkg generic map (default)");
     }

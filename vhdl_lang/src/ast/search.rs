@@ -83,9 +83,6 @@ impl<'a> FoundDeclaration<'a> {
 }
 
 pub trait Searcher {
-    /// Visit the complete token span of a declaration or statement.
-    fn visit_statement_span(&mut self, _ctx: &dyn TokenAccess, _span: TokenSpan) {}
-
     /// Search an position that has a reference to a declaration
     fn search_pos_with_ref(
         &mut self,
@@ -319,7 +316,6 @@ impl<T: Search> Search for SeparatedList<T> {
 
 impl Search for LabeledSequentialStatement {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        searcher.visit_statement_span(ctx, self.span());
         return_if_found!(searcher
             .search_decl(
                 ctx,
@@ -557,7 +553,6 @@ impl Search for ProcessStatement {
 
 impl Search for LabeledConcurrentStatement {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        searcher.visit_statement_span(ctx, self.span());
         return_if_found!(searcher
             .search_decl(
                 ctx,
@@ -730,7 +725,6 @@ impl Search for WithTokenSpan<ElementConstraint> {
 
 impl Search for WithTokenSpan<Declaration> {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        searcher.visit_statement_span(ctx, self.span());
         self.item.search(ctx, searcher)
     }
 }
@@ -1342,14 +1336,6 @@ impl Search for ModeViewIndication {
 
 impl Search for InterfaceDeclaration {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        let mut span = self.span();
-        if ctx
-            .get_token(span.end_token + 1)
-            .is_some_and(|token| token.kind == crate::syntax::Kind::SemiColon)
-        {
-            span.end_token += 1;
-        }
-        searcher.visit_statement_span(ctx, span);
         match self {
             InterfaceDeclaration::Object(ref decl) => {
                 for ident in &decl.idents {
@@ -1497,7 +1483,6 @@ impl Search for LibraryClause {
 
 impl Search for ContextItem {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        searcher.visit_statement_span(ctx, self.span());
         return_if_finished!(searcher.search_with_pos(ctx, &self.get_pos(ctx)));
         match self {
             ContextItem::Use(ref use_clause) => {
@@ -1516,7 +1501,6 @@ impl Search for ContextItem {
 
 impl Search for AnyDesignUnit {
     fn search(&self, ctx: &dyn TokenAccess, searcher: &mut impl Searcher) -> SearchResult {
-        searcher.visit_statement_span(ctx, self.span());
         delegate_any!(self, unit, unit.search(ctx, searcher))
     }
 }

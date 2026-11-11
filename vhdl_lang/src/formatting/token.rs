@@ -9,12 +9,12 @@ use crate::ast::WithDecl;
 use crate::formatting::buffer::Buffer;
 use crate::formatting::VHDLFormatter;
 use crate::{TokenAccess, TokenId};
+use std::cmp::max;
 use vhdl_lang::ast::Ident;
 use vhdl_lang::TokenSpan;
 
 impl VHDLFormatter<'_> {
     pub(crate) fn format_token_id(&self, id: TokenId, buffer: &mut Buffer) {
-        buffer.align_before(id);
         buffer.push_token(self.tokens.index(id));
     }
 
@@ -33,20 +33,6 @@ impl VHDLFormatter<'_> {
         }
     }
 
-    /// A short keyword/name prefix with legal whitespace breaks, used by
-    /// subprogram specifications when even the name does not fit after a keyword.
-    pub(crate) fn format_wrapped_token_span(&self, span: TokenSpan, buffer: &mut Buffer) {
-        buffer.fill_group(|buffer| {
-            self.format_token_id(span.start_token, buffer);
-            buffer.with_indent(|buffer| {
-                for id in span.iter().skip(1) {
-                    buffer.soft_line();
-                    self.format_token_id(id, buffer);
-                }
-            });
-        });
-    }
-
     pub(crate) fn format_ident(&self, ident: &WithDecl<Ident>, buffer: &mut Buffer) {
         self.format_token_id(ident.tree.token, buffer)
     }
@@ -55,23 +41,10 @@ impl VHDLFormatter<'_> {
         let current_line = self.tokens.get_pos(token_id).end().line;
         if let Some(token) = self.tokens.get_token(token_id + 1) {
             let next_line = token.full_range().start.line;
-            let numbers_of_whitespaces = (next_line - current_line).clamp(1, 2);
+            let numbers_of_whitespaces = max(next_line - current_line, 1);
             buffer.line_breaks(numbers_of_whitespaces)
         } else {
             buffer.line_break();
-        }
-    }
-
-    pub(crate) fn soft_line_preserve_blank_line(&self, token_id: TokenId, buffer: &mut Buffer) {
-        let current_line = self.tokens.get_pos(token_id).end().line;
-        if self
-            .tokens
-            .get_token(token_id + 1)
-            .is_some_and(|token| token.full_range().start.line > current_line + 1)
-        {
-            buffer.blank_line();
-        } else {
-            buffer.soft_line();
         }
     }
 }

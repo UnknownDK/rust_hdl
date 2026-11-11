@@ -1751,6 +1751,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "vhdl-fmt"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "ignore",
+ "predicates",
+ "rayon",
+ "serde",
+ "similar 3.2.0",
+ "tempfile",
+ "toml",
+ "vhdl_syntax",
+]
+
+[[package]]
 name = "vhdl-lint"
 version = "0.1.0"
 dependencies = [
@@ -1801,7 +1817,6 @@ dependencies = [
  "predicates",
  "pretty_assertions",
  "rayon",
- "similar 2.7.0",
  "strum",
  "subst",
  "tempfile",

@@ -31,16 +31,10 @@ impl VHDLFormatter<'_> {
                 self.join_token_span(TokenSpan::new(span.end_token - 1, span.end_token), buffer);
             }
             Slice(name, range) => {
-                buffer.expression_group(|buffer| {
-                    self.format_name(name.as_ref().as_ref(), buffer);
-                    self.format_token_id(name.span.end_token + 1, buffer);
-                    buffer.with_indent(|buffer| {
-                        buffer.soft_break(false);
-                        self.format_discrete_range(range, buffer);
-                    });
-                    buffer.soft_break(false);
-                    self.format_token_id(span.end_token, buffer);
-                });
+                self.format_name(name.as_ref().as_ref(), buffer);
+                self.format_token_id(name.span.end_token + 1, buffer);
+                self.format_discrete_range(range, buffer);
+                self.format_token_id(span.end_token, buffer);
             }
             Attribute(attr_name) => self.format_attribute_name(attr_name, buffer),
             CallOrIndexed(call_or_indexed) => {
@@ -58,45 +52,22 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        let multiline = call.parameters.items.len() > buffer.config().inline_argument_limit;
-        buffer.expression_group(|buffer| {
-            self.format_name(call.name.as_ref(), buffer);
-            let open_paren = call.name.span.end_token + 1;
-            if self.tokens.index(open_paren).kind == Kind::LeftPar {
-                self.format_token_id(open_paren, buffer);
+        self.format_name(call.name.as_ref(), buffer);
+        let open_paren = call.name.span.end_token + 1;
+        if self.tokens.index(open_paren).kind == Kind::LeftPar {
+            self.format_token_id(open_paren, buffer);
+        }
+        for (i, parameter) in call.parameters.items.iter().enumerate() {
+            self.format_association_element(parameter, buffer);
+            if let Some(token) = call.parameters.tokens.get(i) {
+                self.format_token_id(*token, buffer);
+                buffer.push_whitespace();
             }
-            buffer.with_indent(|buffer| {
-                if !call.parameters.items.is_empty() {
-                    if multiline {
-                        buffer.line_break();
-                    } else {
-                        buffer.soft_break(false);
-                    }
-                }
-                for (i, parameter) in call.parameters.items.iter().enumerate() {
-                    self.format_association_element(parameter, buffer);
-                    if let Some(token) = call.parameters.tokens.get(i) {
-                        self.format_token_id(*token, buffer);
-                        if multiline {
-                            buffer.line_break();
-                        } else {
-                            buffer.soft_line();
-                        }
-                    }
-                }
-            });
-            if !call.parameters.items.is_empty() {
-                if multiline {
-                    buffer.line_break();
-                } else {
-                    buffer.soft_break(false);
-                }
-            }
-            let close_paren = span.end_token;
-            if self.tokens.index(close_paren).kind == Kind::RightPar {
-                self.format_token_id(close_paren, buffer);
-            }
-        });
+        }
+        let close_paren = span.end_token;
+        if self.tokens.index(close_paren).kind == Kind::RightPar {
+            self.format_token_id(close_paren, buffer);
+        }
     }
 
     pub fn format_attribute_name(&self, name: &AttributeName, buffer: &mut Buffer) {
@@ -115,58 +86,55 @@ impl VHDLFormatter<'_> {
     }
 
     pub fn format_external_name(&self, name: WithTokenSpan<&ExternalName>, buffer: &mut Buffer) {
-        buffer.expression_group(|buffer| {
-            self.format_token_id(name.span.start_token, buffer);
-            buffer.with_indent(|buffer| {
-                buffer.soft_line();
-                buffer.fill_group(|buffer| {
-                    self.format_token_id(name.span.start_token + 1, buffer);
-                    buffer.soft_line();
-                    let path = &name.item.path;
-                    match &path.item {
-                        ExternalPath::Package(name) => {
-                            self.format_token_id(name.span.start_token - 1, buffer);
-                            self.format_name(name.as_ref(), buffer)
-                        }
-                        ExternalPath::Absolute(name) => {
-                            self.format_token_id(name.span.start_token - 1, buffer);
-                            self.format_name(name.as_ref(), buffer);
-                        }
-                        ExternalPath::Relative(name, up_levels) => {
-                            for i in (1..=*up_levels).rev() {
-                                self.format_token_id(name.span.start_token - (2 * i), buffer);
-                                self.format_token_id(name.span.start_token - (2 * i - 1), buffer);
-                            }
-                            self.format_name(name.as_ref(), buffer)
-                        }
-                    }
-                    buffer.push_whitespace();
-                    self.format_token_id(name.item.colon_token, buffer);
-                    buffer.with_indent(|buffer| {
-                        buffer.preferred_line();
-                        self.format_subtype_indication(&name.item.subtype, buffer);
-                    });
-                });
-            });
-            buffer.soft_line();
-            self.format_token_id(name.span.end_token, buffer);
-        });
+        // <<
+        self.format_token_id(name.span.start_token, buffer);
+        buffer.push_whitespace();
+        // entity class
+        self.format_token_id(name.span.start_token + 1, buffer);
+        buffer.push_whitespace();
+        let path = &name.item.path;
+        match &path.item {
+            ExternalPath::Package(name) => {
+                // @
+                self.format_token_id(name.span.start_token - 1, buffer);
+                self.format_name(name.as_ref(), buffer)
+            }
+            ExternalPath::Absolute(name) => {
+                // .
+                self.format_token_id(name.span.start_token - 1, buffer);
+                self.format_name(name.as_ref(), buffer);
+            }
+            ExternalPath::Relative(name, up_levels) => {
+                for i in (1..=*up_levels).rev() {
+                    // ^
+                    self.format_token_id(name.span.start_token - (2 * i), buffer);
+                    // .
+                    self.format_token_id(name.span.start_token - (2 * i - 1), buffer);
+                }
+                self.format_name(name.as_ref(), buffer)
+            }
+        }
+        buffer.push_whitespace();
+        self.format_token_id(name.item.colon_token, buffer);
+        buffer.push_whitespace();
+        self.format_subtype_indication(&name.item.subtype, buffer);
+        buffer.push_whitespace();
+        // >>
+        self.format_token_id(name.span.end_token, buffer);
     }
 
     pub fn format_name_list(&self, buffer: &mut Buffer, names: &[WithTokenSpan<Name>]) {
-        buffer.expression_group(|buffer| {
-            for name in names {
-                self.format_name(name.as_ref(), buffer);
-                if self
-                    .tokens
-                    .get_token(name.span.end_token + 1)
-                    .is_some_and(|token| token.kind == Kind::Comma)
-                {
-                    self.format_token_id(name.span.end_token + 1, buffer);
-                    buffer.soft_line();
-                }
+        for name in names {
+            self.format_name(name.as_ref(), buffer);
+            if self
+                .tokens
+                .get_token(name.span.end_token + 1)
+                .is_some_and(|token| token.kind == Kind::Comma)
+            {
+                self.format_token_id(name.span.end_token + 1, buffer);
+                buffer.push_whitespace();
             }
-        });
+        }
     }
 }
 

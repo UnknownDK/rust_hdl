@@ -13,7 +13,10 @@ use vhdl_lang::indented;
 
 impl VHDLFormatter<'_> {
     pub fn format_entity(&self, entity: &EntityDeclaration, buffer: &mut Buffer) {
-        self.format_design_context(&entity.context_clause, buffer);
+        self.format_context_clause(&entity.context_clause, buffer);
+        if let Some(item) = entity.context_clause.last() {
+            self.line_break_preserve_whitespace(item.span().end_token, buffer);
+        }
         let span = entity.span();
         // entity <ident> is
         self.format_token_span(TokenSpan::new(span.start_token, entity.is_token()), buffer);
@@ -35,9 +38,7 @@ impl VHDLFormatter<'_> {
             buffer.line_break();
             self.format_token_id(token, buffer);
         }
-        indented!(buffer, {
-            self.format_concurrent_statements(&entity.statements, buffer)
-        });
+        self.format_concurrent_statements(&entity.statements, buffer);
         buffer.line_break();
         // end [entity] [name];
         self.format_token_span(TokenSpan::new(entity.end_token, span.end_token - 1), buffer);
@@ -136,7 +137,9 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    generic (foo: in std_logic := '1');
+    generic (
+        foo: in std_logic := '1'
+    );
 end foo;",
         );
     }
@@ -146,7 +149,9 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    port (foo: in std_logic := '1');
+    port (
+        foo: in std_logic := '1'
+    );
 end foo;",
         );
     }
@@ -156,8 +161,12 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    generic (a: in std_logic := '1');
-    port (B: in std_logic := '1');
+    generic (
+        a: in std_logic := '1'
+    );
+    port (
+        B: in std_logic := '1'
+    );
 end foo;",
         );
     }
@@ -167,7 +176,9 @@ end foo;",
         check_entity_formatted(
             "\
 entity foo is
-    port (foo: in std_logic := '1');
+    port (
+        foo: in std_logic := '1'
+    );
     constant x: foo := bar;
     signal y: bar := foobar;
 end foo;",

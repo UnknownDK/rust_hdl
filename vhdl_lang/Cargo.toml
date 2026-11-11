@@ -29,10 +29,9 @@ itertools.workspace = true
 subst.workspace = true
 strum.workspace = true
 enum-map.workspace = true
-tempfile.workspace = true
-similar = "2.7"
 
 [dev-dependencies]
+tempfile.workspace = true
 pretty_assertions.workspace = true
 assert_matches.workspace = true
 brunch.workspace = true
@@ -41,10 +40,6 @@ predicates.workspace = true
 
 [[bench]]
 name = "benchmark"
-harness = false
-
-[[bench]]
-name = "formatter"
 harness = false
 
 [features]

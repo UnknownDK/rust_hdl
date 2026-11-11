@@ -47,7 +47,7 @@ impl VHDLFormatter<'_> {
         buffer: &mut Buffer,
     ) {
         // procedure <name>
-        self.format_wrapped_token_span(
+        self.format_token_span(
             TokenSpan::new(
                 specification.span.start_token,
                 specification.designator.tree.token,
@@ -74,49 +74,36 @@ impl VHDLFormatter<'_> {
         specification: &FunctionSpecification,
         buffer: &mut Buffer,
     ) {
-        // A multiline parameter list must not force `return` off the closing
-        // parenthesis line. The return clause still wraps when its suffix cannot fit.
-        buffer.fill_group(|buffer| {
-            // function <name>
-            self.format_wrapped_token_span(
+        // function <name>
+        self.format_token_span(
+            TokenSpan::new(
+                specification.span.start_token,
+                specification.designator.tree.token,
+            ),
+            buffer,
+        );
+        if let Some(header) = &specification.header {
+            self.format_subprogram_header(header, buffer);
+        }
+        if let Some(parameter) = &specification.parameter_list {
+            self.format_interface_list(parameter, buffer);
+        }
+        buffer.push_whitespace();
+        if let Some(return_identifier) = &specification.return_identifier {
+            // return <identifier> of
+            self.format_token_span(
                 TokenSpan::new(
-                    specification.span.start_token,
-                    specification.designator.tree.token,
+                    return_identifier.tree.token - 1,
+                    specification.return_type.span.start_token - 1,
                 ),
                 buffer,
             );
-            if let Some(header) = &specification.header {
-                self.format_subprogram_header(header, buffer);
-            }
-            if let Some(parameter) = &specification.parameter_list {
-                self.format_interface_list(parameter, buffer);
-            }
-            buffer.with_indent(|buffer| {
-                buffer.soft_line();
-                buffer.group(|buffer| {
-                    if let Some(return_identifier) = &specification.return_identifier {
-                        // return <identifier> of
-                        self.format_token_span(
-                            TokenSpan::new(
-                                return_identifier.tree.token - 1,
-                                specification.return_type.span.start_token - 1,
-                            ),
-                            buffer,
-                        );
-                    } else {
-                        // return
-                        self.format_token_id(
-                            specification.return_type.span.start_token - 1,
-                            buffer,
-                        );
-                    }
-                    buffer.with_indent(|buffer| {
-                        buffer.soft_line();
-                        self.format_name(specification.return_type.as_ref(), buffer);
-                    });
-                });
-            });
-        });
+        } else {
+            // return
+            self.format_token_id(specification.return_type.span.start_token - 1, buffer);
+        }
+        buffer.push_whitespace();
+        self.format_name(specification.return_type.as_ref(), buffer);
     }
 
     pub fn format_subprogram_header(&self, header: &SubprogramHeader, buffer: &mut Buffer) {
@@ -135,10 +122,10 @@ impl VHDLFormatter<'_> {
         buffer.push_whitespace();
         // is
         self.format_token_id(body.specification.span().end_token + 1, buffer);
+        buffer.line_break();
         indented!(buffer, {
             self.format_declarations(&body.declarations, buffer);
         });
-        buffer.line_break();
         self.format_token_id(body.begin_token, buffer);
         self.format_sequential_statements(&body.statements, buffer);
         buffer.line_break();
@@ -242,15 +229,28 @@ mod test {
 
     #[test]
     fn test_subprogram_declaration_one_parameter() {
-        check_subprogram_declaration("procedure foo(a: std_logic);");
-        check_subprogram_declaration("function foo(a: std_logic) return std_logic;");
+        check_subprogram_declaration(
+            "\
+procedure foo(
+    a: std_logic
+);",
+        );
+        check_subprogram_declaration(
+            "\
+function foo(
+    a: std_logic
+) return std_logic;",
+        );
     }
 
     #[test]
     fn test_subprogram_declaration_multiple_parameters() {
         check_subprogram_declaration(
             "\
-procedure foo(arg0: std_logic; arg1: std_logic);",
+procedure foo(
+    arg0: std_logic;
+    arg1: std_logic
+);",
         );
     }
 
@@ -259,19 +259,29 @@ procedure foo(arg0: std_logic; arg1: std_logic);",
         check_subprogram_declaration(
             "\
 procedure foo
-    generic (x: natural);",
+    generic (
+        x: natural
+    );",
         );
         check_subprogram_declaration(
             "\
 procedure foo
-    generic (x: natural)
-    parameter (a: std_logic);",
+    generic (
+        x: natural
+    )
+    parameter (
+        a: std_logic
+    );",
         );
         check_subprogram_declaration(
             "\
 procedure foo
-    generic (x: natural)
-    (a: std_logic);",
+    generic (
+        x: natural
+    )
+    (
+        a: std_logic
+    );",
         );
     }
 
@@ -288,13 +298,17 @@ procedure foo
     fn test_subprogram_body() {
         check_declaration(
             "\
-function \"+\"(arg: natural) return natural is
+function \"+\"(
+    arg: natural
+) return natural is
 begin
 end function \"+\";",
         );
         check_declaration(
             "\
-function foo(arg: natural) return natural is
+function foo(
+    arg: natural
+) return natural is
 begin
 end function foo;",
         );
@@ -306,7 +320,10 @@ end function foo;",
         check_declaration("function my_func is new func;");
         check_declaration("function my_func is new func[bit return bit_vector];");
         check_declaration(
-            "function my_func is new func[bit return bit_vector] generic map (x => x);",
+            "\
+function my_func is new func[bit return bit_vector] generic map (
+    x => x
+);",
         );
     }
 }

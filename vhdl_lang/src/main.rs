@@ -4,35 +4,15 @@
 //
 // Copyright (c) 2018, Olof Kraigher olof.kraigher@gmail.com
 
-mod format_cli;
-
 use clap::Parser;
 use itertools::Itertools;
-use std::io::{self, Read, Write};
+use std::iter::zip;
 use std::path::{Path, PathBuf};
+use vhdl_lang::ast::DesignFile;
 use vhdl_lang::{
-    format_text_with_config, Config, Diagnostic, FormatConfig, FormatError, KeywordCase,
-    Latin1String, MessagePrinter, Project, Severity, SeverityMap, VHDLParser, VHDLStandard,
+    Config, Diagnostic, MessagePrinter, Project, Severity, SeverityMap, Source, VHDLFormatter,
+    VHDLParser, VHDLStandard,
 };
-
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
-enum InputEncoding {
-    #[default]
-    Utf8,
-    Latin1,
-}
-
-impl InputEncoding {
-    fn decode(self, bytes: Vec<u8>) -> io::Result<String> {
-        match self {
-            Self::Utf8 => String::from_utf8(bytes).map_err(|err| {
-                io::Error::new(io::ErrorKind::InvalidData,
-                    format!("formatter input is not valid UTF-8 ({err}); for ISO-8859-1 input, use --input-encoding latin1"))
-            }),
-            Self::Latin1 => Ok(Latin1String::from_vec(bytes).to_string()),
-        }
-    }
-}
 
 #[derive(Debug, clap::Args)]
 #[group(required = true, multiple = false)]
@@ -41,16 +21,11 @@ pub struct Group {
     #[arg(short, long)]
     config: Option<String>,
 
-    /// Format files or recursively discover .vhd/.vhdl files in directories.
-    /// A single file defaults to stdout; directories/multiple paths need an output mode.
+    /// Format the passed file and write the contents to stdout.
     ///
     /// This is experimental and the formatting behavior will change in the future.
-    #[arg(short, long, num_args = 1..)]
-    format: Vec<PathBuf>,
-
-    /// Format VHDL read from stdin and write the complete result to stdout.
-    #[arg(long)]
-    format_stdin: bool,
+    #[arg(short, long)]
+    format: Option<String>,
 }
 
 /// Run vhdl analysis
@@ -66,233 +41,64 @@ struct Args {
     #[arg(short = 'l', long)]
     libraries: Option<String>,
 
-    /// Source path for diagnostics and project configuration discovery in stdin mode.
-    #[arg(long, requires = "format_stdin")]
-    stdin_filepath: Option<PathBuf>,
-
-    /// Input encoding. Stdout is UTF-8; --write preserves the selected encoding.
-    #[arg(long, value_enum, default_value_t = InputEncoding::Utf8, conflicts_with = "config")]
-    input_encoding: InputEncoding,
-
-    /// Report files needing formatting; exit 1 if any differ, without writing.
-    #[arg(long, conflicts_with_all = ["write", "diff", "config"])]
-    check: bool,
-
-    /// Print unified diffs; exit 1 if any differ, without writing.
-    #[arg(long, conflicts_with_all = ["write", "config"])]
-    diff: bool,
-
-    /// Atomically replace formatted files after validating the complete batch.
-    #[arg(long, conflicts_with_all = ["format_stdin", "config"])]
-    write: bool,
-
-    /// Exclude matching paths (repeatable glob; matches even explicitly named files).
-    #[arg(long, conflicts_with_all = ["format_stdin", "config"])]
-    exclude: Vec<String>,
-
-    /// Preferred formatter line width (unbreakable text may exceed this).
-    #[arg(long)]
-    max_width: Option<usize>,
-
-    /// Spaces per formatter indentation level.
-    #[arg(long)]
-    indent_width: Option<usize>,
-
-    /// Case of reserved words; identifiers, literals and comments are unchanged.
-    #[arg(long, value_enum)]
-    keyword_case: Option<KeywordCase>,
-
-    /// Align declaration colons (pass false to override project settings).
-    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
-    align_declarations: Option<bool>,
-
-    /// Align named map/aggregate arrows (pass false to override project settings).
-    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
-    align_associations: Option<bool>,
-
-    /// Align assignment operators in adjacent simple statements (pass false to override project settings).
-    #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
-    align_assignments: Option<bool>,
-
-    /// Inline limit for calls, interfaces, maps and named aggregates (default: 2; 0 expands).
-    #[arg(long)]
-    inline_argument_limit: Option<usize>,
-
-    /// Explicit formatter project TOML file, instead of ancestor discovery.
-    #[arg(long, conflicts_with = "no_format_config")]
-    format_config: Option<PathBuf>,
-
-    /// Ignore project formatter configuration and use defaults plus CLI overrides.
-    #[arg(long)]
-    no_format_config: bool,
-
-    /// VHDL standard used by the formatter (default: 2008).
-    #[arg(long, value_parser = ["1993", "2008", "2019"])]
-    standard: Option<String>,
-
     #[clap(flatten)]
     group: Group,
 }
 
 fn main() {
     let args = Args::parse();
-    if let Some(config_path) = &args.group.config {
-        parse_and_analyze_project(config_path, args.num_threads, args.libraries.as_ref());
-    } else {
-        let result = format_cli::run(&args);
-        match result {
-            Ok(code) => std::process::exit(code),
-            Err(err) => {
-                show_format_error(&err);
-                std::process::exit(
-                    if !args.check
-                        && !args.diff
-                        && !args.write
-                        && matches!(err, CliFormatError::Format(_))
-                    {
-                        1
-                    } else {
-                        2
-                    },
-                );
+    if let Some(config_path) = args.group.config {
+        parse_and_analyze_project(&config_path, args.num_threads, args.libraries.as_ref());
+    } else if let Some(format) = args.group.format {
+        format_file(format);
+    }
+}
+
+fn format_file(format: String) {
+    let path = PathBuf::from(format);
+    let parser = VHDLParser::new(VHDLStandard::default());
+    let mut diagnostics = Vec::new();
+    let result = parser.parse_design_file(&path, &mut diagnostics);
+    match result {
+        Ok((_, design_file)) => {
+            if !diagnostics.is_empty() {
+                show_diagnostics(&diagnostics, &SeverityMap::default());
+                std::process::exit(1);
+            }
+            let result = VHDLFormatter::format_design_file(&design_file);
+            println!("{result}");
+            check_formatted_file(&path, &parser, design_file, &result);
+            std::process::exit(0);
+        }
+        Err(err) => {
+            println!("{err}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn check_formatted_file(path: &Path, parser: &VHDLParser, design_file: DesignFile, result: &str) {
+    let mut diagnostics: Vec<Diagnostic> = Vec::new();
+    let new_file = parser.parse_design_source(&Source::inline(path, result), &mut diagnostics);
+    if !diagnostics.is_empty() {
+        println!("Formatting failed as it resulted in a syntactically incorrect file.");
+        show_diagnostics(&diagnostics, &SeverityMap::default());
+        std::process::exit(1);
+    }
+    for ((tokens_a, _), (tokens_b, _)) in zip(new_file.design_units, design_file.design_units) {
+        for (a, b) in zip(tokens_a, tokens_b) {
+            if !a.equal_format(&b) {
+                println!("Token mismatch");
+                println!("New Token={a:#?}");
+                let contents = a.pos.source.contents();
+                let a_line = contents.get_line(a.pos.range.start.line as usize).unwrap();
+                println!("    {a_line}");
+                println!("Old Token={b:#?}");
+                let b_line = result.lines().nth(b.pos.range.start.line as usize).unwrap();
+                println!("    {b_line}");
+                break;
             }
         }
-    }
-}
-
-fn formatter_settings(
-    args: &Args,
-    source: Option<&Path>,
-) -> Result<(FormatConfig, VHDLStandard), CliFormatError> {
-    let path = if args.no_format_config {
-        None
-    } else if let Some(path) = &args.format_config {
-        Some(path.clone())
-    } else {
-        let cwd = std::env::current_dir()?;
-        // Normalize lexical `..` even for buffers whose file does not exist yet.
-        let source = source.map(|source| {
-            let mut path = PathBuf::new();
-            for component in cwd.join(source).components() {
-                match component {
-                    std::path::Component::ParentDir => {
-                        path.pop();
-                    }
-                    std::path::Component::CurDir => {}
-                    component => path.push(component.as_os_str()),
-                }
-            }
-            path
-        });
-        let directory = source.as_deref().and_then(Path::parent).unwrap_or(&cwd);
-        let mut found = None;
-        for ancestor in directory.ancestors() {
-            let candidate = ancestor.join("vhdl_ls.toml");
-            match std::fs::metadata(&candidate) {
-                Ok(_) => {
-                    found = Some(candidate);
-                    break;
-                }
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                Err(err) => {
-                    return Err(CliFormatError::Config(format!(
-                        "{}: {err}",
-                        candidate.display()
-                    )))
-                }
-            }
-        }
-        found
-    };
-    let mut config = FormatConfig::default();
-    let mut standard = VHDLStandard::default();
-    if let Some(path) = path {
-        let load = || -> Result<(FormatConfig, VHDLStandard), String> {
-            let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-            let config = FormatConfig::from_toml(&text)?;
-            let root = text.parse::<toml::Table>().map_err(|err| err.to_string())?;
-            let standard = if let Some(value) = root.get("standard") {
-                VHDLStandard::try_from(value.as_str().ok_or("standard must be a string")?)
-                    .map_err(|()| "standard must be 1993, 2008 or 2019")?
-            } else {
-                VHDLStandard::default()
-            };
-            Ok((config, standard))
-        };
-        (config, standard) =
-            load().map_err(|err| CliFormatError::Config(format!("{}: {err}", path.display())))?;
-    }
-    if let Some(width) = args.max_width {
-        config.max_width = width;
-    }
-    if let Some(width) = args.indent_width {
-        config.indent_width = width;
-    }
-    if let Some(case) = args.keyword_case {
-        config.keyword_case = case;
-    }
-    if let Some(align) = args.align_declarations {
-        config.align_declarations = align;
-    }
-    if let Some(align) = args.align_associations {
-        config.align_associations = align;
-    }
-    if let Some(align) = args.align_assignments {
-        config.align_assignments = align;
-    }
-    if let Some(limit) = args.inline_argument_limit {
-        config.inline_argument_limit = limit;
-    }
-    if let Some(value) = &args.standard {
-        standard = VHDLStandard::try_from(value.as_str()).expect("clap validates the standard");
-    }
-    config.validate().map_err(CliFormatError::Config)?;
-    Ok((config, standard))
-}
-
-fn write_stdout(output: &str) -> Result<(), CliFormatError> {
-    let stdout = io::stdout();
-    let mut stdout = stdout.lock();
-    stdout.write_all(output.as_bytes())?;
-    stdout.flush()?;
-    Ok(())
-}
-
-#[derive(Debug)]
-enum CliFormatError {
-    Config(String),
-    Io(io::Error),
-    Format(FormatError),
-}
-
-impl From<io::Error> for CliFormatError {
-    fn from(err: io::Error) -> Self {
-        Self::Io(err)
-    }
-}
-
-impl From<FormatError> for CliFormatError {
-    fn from(err: FormatError) -> Self {
-        Self::Format(err)
-    }
-}
-
-fn show_format_error(err: &CliFormatError) {
-    match err {
-        CliFormatError::Config(message) => eprintln!("formatter configuration: {message}"),
-        CliFormatError::Io(err) => eprintln!("{err}"),
-        CliFormatError::Format(FormatError::InputDiagnostics(diagnostics)) => {
-            eprintln!("input contains {} parse diagnostic(s)", diagnostics.len());
-            show_diagnostics_to(diagnostics, &SeverityMap::default(), &mut io::stderr());
-        }
-        CliFormatError::Format(FormatError::OutputDiagnostics(diagnostics)) => {
-            eprintln!(
-                "formatted output contains {} parse diagnostic(s)",
-                diagnostics.len()
-            );
-            show_diagnostics_to(diagnostics, &SeverityMap::default(), &mut io::stderr());
-        }
-        CliFormatError::Format(err) => eprintln!("{err}"),
     }
 }
 
@@ -350,31 +156,22 @@ fn in_output_order(diagnostics: &[Diagnostic]) -> Vec<&Diagnostic> {
 }
 
 fn show_diagnostics(diagnostics: &[Diagnostic], severity_map: &SeverityMap) {
-    show_diagnostics_to(diagnostics, severity_map, &mut io::stdout());
-}
-
-fn show_diagnostics_to(
-    diagnostics: &[Diagnostic],
-    severity_map: &SeverityMap,
-    writer: &mut dyn Write,
-) {
     let diagnostics = in_output_order(diagnostics)
         .into_iter()
         .filter_map(|diag| diag.show(severity_map))
         .collect_vec();
     for str in &diagnostics {
-        let _ = writeln!(writer, "{str}");
+        println!("{str}");
     }
 
     if !diagnostics.is_empty() {
-        let _ = writeln!(writer, "Found {} diagnostics", diagnostics.len());
+        println!("Found {} diagnostics", diagnostics.len());
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vhdl_lang::Source;
 
     fn parse_errors(file_name: &str, contents: &str) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
@@ -417,36 +214,6 @@ mod tests {
                 ("a.vhd".to_string(), 1),
                 ("b.vhd".to_string(), 0)
             ]
-        );
-    }
-
-    #[test]
-    fn default_formatter_encoding_does_not_conflict_with_analysis_mode() {
-        assert!(Args::try_parse_from(["vhdl_lang", "--config", "project.toml"]).is_ok());
-        assert!(Args::try_parse_from([
-            "vhdl_lang",
-            "--config",
-            "project.toml",
-            "--input-encoding",
-            "latin1"
-        ])
-        .is_err());
-    }
-
-    #[test]
-    fn formatter_accepts_only_supported_input_encodings() {
-        for encoding in ["utf8", "latin1"] {
-            assert!(Args::try_parse_from([
-                "vhdl_lang",
-                "--format-stdin",
-                "--input-encoding",
-                encoding
-            ])
-            .is_ok());
-        }
-        assert!(
-            Args::try_parse_from(["vhdl_lang", "--format-stdin", "--input-encoding", "utf16"])
-                .is_err()
         );
     }
 }

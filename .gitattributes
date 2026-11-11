@@ -1,5 +1,3 @@
-# Golden outputs are compared with the formatter's canonical LF output, even
-# when the working tree otherwise uses CRLF (for example on Windows).
-vhdl_lang/tests/formatting/*.vhd text eol=lf
-# Preserve upstream whitespace in these unmodified input snapshots.
-vhdl_lang/tests/formatting/corpus/**/*.vhdl text eol=lf whitespace=-blank-at-eol,-blank-at-eof
+# Expected formatter outputs are compared byte for byte with LF line endings,
+# even when the working tree otherwise uses CRLF (for example on Windows).
+vhdl-fmt/tests/fixtures/*.vhd text eol=lf

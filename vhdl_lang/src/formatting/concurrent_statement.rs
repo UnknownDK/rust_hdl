@@ -42,43 +42,12 @@ impl VHDLFormatter<'_> {
             return;
         }
         buffer.line_break();
-        let align = buffer.config().align_assignments;
-        self.format_aligned_items_with_trailing_comments(
-            statements,
-            buffer,
-            false,
-            |item| {
-                if !align || item.label.tree.is_some() {
-                    return None;
-                }
-                match &item.statement.item {
-                    ConcurrentStatement::Assignment(assignment)
-                        if !assignment.postponed
-                            && !assignment.guarded
-                            && !matches!(
-                                assignment.assignment.rhs,
-                                AssignmentRightHand::Selected(_)
-                            ) =>
-                    {
-                        Some(assignment.assignment.target.span.end_token + 1)
-                    }
-                    _ => None,
-                }
-            },
-            |item| item.statement.span,
-            |i, item, buffer| {
-                self.format_labeled_concurrent_statement(item, buffer);
-                if let Some(next) = statements.get(i + 1) {
-                    if matches!(item.statement.item, ConcurrentStatement::Process(_))
-                        || matches!(next.statement.item, ConcurrentStatement::Process(_))
-                    {
-                        buffer.blank_line();
-                    } else {
-                        self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
-                    }
-                }
-            },
-        );
+        for (i, item) in statements.iter().enumerate() {
+            self.format_labeled_concurrent_statement(item, buffer);
+            if i < statements.len() - 1 {
+                self.line_break_preserve_whitespace(item.statement.get_end_token(), buffer);
+            }
+        }
     }
 
     pub fn format_optional_label(&self, label: Option<&Ident>, buffer: &mut Buffer) {
@@ -86,7 +55,7 @@ impl VHDLFormatter<'_> {
             self.format_token_id(label.token, buffer);
             // :
             self.format_token_id(label.token + 1, buffer);
-            buffer.soft_line();
+            buffer.push_whitespace();
         }
     }
 
@@ -95,14 +64,8 @@ impl VHDLFormatter<'_> {
         statement: &LabeledConcurrentStatement,
         buffer: &mut Buffer,
     ) {
-        if statement.label.tree.is_none() {
-            self.format_concurrent_statement(&statement.statement, buffer);
-            return;
-        }
-        buffer.fill_group(|buffer| {
-            self.format_optional_label(statement.label.tree.as_ref(), buffer);
-            self.format_concurrent_statement(&statement.statement, buffer);
-        });
+        self.format_optional_label(statement.label.tree.as_ref(), buffer);
+        self.format_concurrent_statement(&statement.statement, buffer);
     }
 
     pub fn format_concurrent_statement(
@@ -255,25 +218,20 @@ impl VHDLFormatter<'_> {
     ) {
         self.token_with_opt_postponed(span, buffer);
         buffer.push_whitespace();
-        buffer.with_indent(|buffer| self.format_assert_statement(&statement.statement, buffer));
+        self.format_assert_statement(&statement.statement, buffer);
         // ;
         self.format_token_id(span.end_token, buffer);
     }
 
     pub fn format_assert_statement(&self, assert_statement: &AssertStatement, buffer: &mut Buffer) {
-        buffer.group(|buffer| {
-            self.format_expression(assert_statement.condition.as_ref(), buffer);
-            if let Some(report) = &assert_statement.report {
-                buffer.line_break();
-                self.format_token_id(report.span.start_token - 1, buffer);
-                buffer.push_whitespace();
-                self.format_expression(report.as_ref(), buffer);
-            }
-            if assert_statement.severity.is_some() {
-                buffer.line_break();
-            }
-            self.format_opt_severity(assert_statement.severity.as_ref(), buffer);
-        });
+        self.format_expression(assert_statement.condition.as_ref(), buffer);
+        if let Some(report) = &assert_statement.report {
+            buffer.push_whitespace();
+            self.format_token_id(report.span.start_token - 1, buffer);
+            buffer.push_whitespace();
+            self.format_expression(report.as_ref(), buffer);
+        }
+        self.format_opt_severity(assert_statement.severity.as_ref(), buffer);
     }
 
     pub fn format_assignment_statement(
@@ -282,40 +240,34 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_signal_assignment(&assignment_statement.assignment, span, buffer);
-    }
-
-    /// A selected assignment's header and body flatten together. Once expanded,
-    /// the target starts below `with ... select`, with later alternatives one
-    /// further indentation level in. Ordinary assignments retain local filling.
-    pub(crate) fn format_assignment_layout<T>(
-        &self,
-        rhs: &AssignmentRightHand<T>,
-        span: TokenSpan,
-        buffer: &mut Buffer,
-        body: impl FnOnce(&mut Buffer),
-    ) {
-        if let AssignmentRightHand::Selected(selected) = rhs {
-            buffer.group(|buffer| {
-                self.format_token_span(
-                    TokenSpan::new(span.start_token, selected.expression.span.start_token - 1),
-                    buffer,
-                );
-                buffer.push_whitespace();
-                self.format_expression(selected.expression.as_ref(), buffer);
-                buffer.push_whitespace();
-                self.format_token_id(selected.expression.span.end_token + 1, buffer);
-                if selected.is_matching {
-                    self.format_token_id(selected.expression.span.end_token + 2, buffer);
-                }
-                buffer.with_indent(|buffer| {
-                    buffer.soft_line();
-                    buffer.fill_group(body);
-                });
-            });
-        } else {
-            buffer.fill_group(body);
+        if let AssignmentRightHand::Selected(selected) = &assignment_statement.assignment.rhs {
+            // with
+            self.format_token_id(selected.expression.span.start_token - 1, buffer);
+            buffer.push_whitespace();
+            self.format_expression(selected.expression.as_ref(), buffer);
+            buffer.push_whitespace();
+            // select
+            self.format_token_id(selected.expression.span.end_token + 1, buffer);
+            buffer.push_whitespace();
         }
+        self.format_target(&assignment_statement.assignment.target, buffer);
+        buffer.push_whitespace();
+        // <=
+        self.format_token_id(
+            assignment_statement.assignment.target.span.end_token + 1,
+            buffer,
+        );
+        buffer.push_whitespace();
+        if let Some(mechanism) = &assignment_statement.assignment.delay_mechanism {
+            self.format_delay_mechanism(mechanism, buffer);
+            buffer.push_whitespace();
+        }
+        self.format_assignment_right_hand(
+            &assignment_statement.assignment.rhs,
+            Self::format_waveform,
+            buffer,
+        );
+        self.format_token_id(span.end_token, buffer);
     }
 
     pub fn format_assignment_right_hand<T>(
@@ -324,28 +276,26 @@ impl VHDLFormatter<'_> {
         formatter: impl Fn(&Self, &T, &mut Buffer),
         buffer: &mut Buffer,
     ) {
-        buffer.group(|buffer| {
-            use AssignmentRightHand::*;
-            match right_hand {
-                Simple(simple) => formatter(self, simple, buffer),
-                Conditional(conditionals) => {
-                    self.format_assignment_right_hand_conditionals(conditionals, formatter, buffer)
-                }
-                Selected(selection) => {
-                    for alternative in &selection.alternatives {
-                        self.format_alternative(alternative, &formatter, buffer);
-                        if self
-                            .tokens
-                            .get_token(alternative.span.end_token + 1)
-                            .is_some_and(|token| token.kind == Kind::Comma)
-                        {
-                            self.format_token_id(alternative.span.end_token + 1, buffer);
-                            buffer.soft_line();
-                        }
+        use AssignmentRightHand::*;
+        match right_hand {
+            Simple(simple) => formatter(self, simple, buffer),
+            Conditional(conditionals) => {
+                self.format_assignment_right_hand_conditionals(conditionals, formatter, buffer)
+            }
+            Selected(selection) => {
+                for alternative in &selection.alternatives {
+                    self.format_alternative(alternative, &formatter, buffer);
+                    if self
+                        .tokens
+                        .get_token(alternative.span.end_token + 1)
+                        .is_some_and(|token| token.kind == Kind::Comma)
+                    {
+                        self.format_token_id(alternative.span.end_token + 1, buffer);
+                        buffer.push_whitespace();
                     }
                 }
             }
-        });
+        }
     }
 
     pub fn format_alternative<T>(
@@ -354,17 +304,22 @@ impl VHDLFormatter<'_> {
         formatter: &impl Fn(&Self, &T, &mut Buffer),
         buffer: &mut Buffer,
     ) {
-        buffer.fill_group(|buffer| {
-            formatter(self, &alternative.item, buffer);
-            if let Some(first) = alternative.choices.first() {
-                buffer.with_indent(|buffer| {
-                    buffer.soft_line();
-                    self.format_token_id(first.span.start_token - 1, buffer);
-                    buffer.push_whitespace();
-                    self.format_choices(&alternative.choices, buffer);
-                });
+        formatter(self, &alternative.item, buffer);
+        buffer.push_whitespace();
+        for (i, choice) in alternative.choices.iter().enumerate() {
+            if i == 0 {
+                // when
+                self.format_token_id(choice.span.start_token - 1, buffer);
+                buffer.push_whitespace();
             }
-        });
+            self.format_choice(choice, buffer);
+            if i < alternative.choices.len() - 1 {
+                buffer.push_whitespace();
+                // |
+                self.format_token_id(choice.span.end_token + 1, buffer);
+                buffer.push_whitespace();
+            }
+        }
     }
 
     pub fn format_assignment_right_hand_conditionals<T>(
@@ -373,71 +328,55 @@ impl VHDLFormatter<'_> {
         formatter: impl Fn(&Self, &T, &mut Buffer),
         buffer: &mut Buffer,
     ) {
-        buffer.group(|buffer| {
-            for cond in &conditionals.conditionals {
-                buffer.group(|buffer| {
-                    // item
-                    formatter(self, &cond.item, buffer);
-                    let condition = &cond.condition;
-                    buffer.soft_line();
-                    // when
-                    self.format_token_id(condition.span.start_token - 1, buffer);
-                    buffer.push_whitespace();
-                    self.format_expression(condition.as_ref(), buffer);
-                });
-                // [else]
-                if self
-                    .tokens
-                    .get_token(cond.condition.span.end_token + 1)
-                    .is_some_and(|token| token.kind == Kind::Else)
-                {
-                    buffer.soft_line();
-                    self.format_token_id(cond.condition.span.end_token + 1, buffer);
-                    buffer.push_whitespace();
-                }
+        for cond in &conditionals.conditionals {
+            // item
+            formatter(self, &cond.item, buffer);
+            let condition = &cond.condition;
+            buffer.push_whitespace();
+            // when
+            self.format_token_id(condition.span.start_token - 1, buffer);
+            buffer.push_whitespace();
+            self.format_expression(condition.as_ref(), buffer);
+            // [else]
+            if self
+                .tokens
+                .get_token(cond.condition.span.end_token + 1)
+                .is_some_and(|token| token.kind == Kind::Else)
+            {
+                buffer.push_whitespace();
+                self.format_token_id(cond.condition.span.end_token + 1, buffer);
+                buffer.push_whitespace();
             }
-            if let Some((statements, _)) = &conditionals.else_item {
-                // else handled above
-                formatter(self, statements, buffer);
-            }
-        });
+        }
+        if let Some((statements, _)) = &conditionals.else_item {
+            // else handled above
+            formatter(self, statements, buffer);
+        }
     }
 
     pub fn format_waveform(&self, waveform: &Waveform, buffer: &mut Buffer) {
-        buffer.group(|buffer| match waveform {
-            Waveform::Elements(elements) => self.format_waveform_elements(elements, buffer),
-            Waveform::Unaffected(token) => self.format_token_id(*token, buffer),
-        });
-    }
-
-    /// Separators inherit the enclosing layout so a simple assignment can
-    /// break before its first element and between all elements together.
-    pub(crate) fn format_waveform_elements(
-        &self,
-        elements: &[WaveformElement],
-        buffer: &mut Buffer,
-    ) {
-        for (i, element) in elements.iter().enumerate() {
-            self.format_waveform_element(element, buffer);
-            if i + 1 < elements.len() {
-                self.format_token_id(element.get_end_token() + 1, buffer);
-                buffer.soft_line();
+        match waveform {
+            Waveform::Elements(elements) => {
+                for (i, element) in elements.iter().enumerate() {
+                    self.format_waveform_element(element, buffer);
+                    if i < elements.len() - 1 {
+                        self.format_token_id(element.get_end_token() + 1, buffer);
+                        buffer.push_whitespace();
+                    }
+                }
             }
+            Waveform::Unaffected(token) => self.format_token_id(*token, buffer),
         }
     }
 
     pub fn format_waveform_element(&self, element: &WaveformElement, buffer: &mut Buffer) {
-        buffer.group(|buffer| {
-            self.format_expression(element.value.as_ref(), buffer);
-            if let Some(after) = &element.after {
-                buffer.with_indent(|buffer| {
-                    buffer.soft_line();
-                    self.format_token_id(after.get_start_token() - 1, buffer);
-                    buffer.push_whitespace();
-                    self.format_expression(after.as_ref(), buffer);
-                });
-            }
-        });
+        self.format_expression(element.value.as_ref(), buffer);
+        if let Some(after) = &element.after {
+            buffer.push_whitespace();
+            self.format_token_id(after.get_start_token() - 1, buffer);
+            buffer.push_whitespace();
+            self.format_expression(after.as_ref(), buffer);
+        }
     }
 
     pub fn format_target(&self, target: &WithTokenSpan<Target>, buffer: &mut Buffer) {
@@ -455,43 +394,11 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        self.format_aggregate(associations, span, false, buffer);
-    }
-
-    pub(crate) fn format_expression_aggregate(
-        &self,
-        associations: &[WithTokenSpan<ElementAssociation>],
-        span: TokenSpan,
-        buffer: &mut Buffer,
-    ) {
-        self.format_aggregate(associations, span, true, buffer);
-    }
-
-    fn format_aggregate(
-        &self,
-        associations: &[WithTokenSpan<ElementAssociation>],
-        span: TokenSpan,
-        pack_simple_positionals: bool,
-        buffer: &mut Buffer,
-    ) {
-        let multiline = self.expand_named_aggregate(associations, buffer);
-        buffer.expression_group(|buffer| {
-            self.format_token_id(span.start_token, buffer);
-            buffer.with_indent(|buffer| {
-                if multiline {
-                    buffer.line_break();
-                } else {
-                    buffer.soft_break(false);
-                }
-                self.format_element_associations(associations, pack_simple_positionals, buffer);
-            });
-            if multiline {
-                buffer.line_break();
-            } else {
-                buffer.soft_break(false);
-            }
-            self.format_token_id(span.end_token, buffer);
-        });
+        // (
+        self.format_token_id(span.start_token, buffer);
+        self.format_element_associations(associations, buffer);
+        // )
+        self.format_token_id(span.end_token, buffer);
     }
 
     pub fn format_instantiation_statement(
@@ -500,47 +407,40 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        buffer.fill_group(|buffer| {
-            let explicit_kind = matches!(
-                self.tokens.index(span.start_token).kind,
-                Kind::Component | Kind::Entity | Kind::Configuration
-            );
-            if explicit_kind {
-                self.format_token_id(span.start_token, buffer);
-                buffer.soft_line();
-                buffer.increase_indent();
+        if matches!(
+            self.tokens.index(span.start_token).kind,
+            Kind::Component | Kind::Entity | Kind::Configuration
+        ) {
+            self.format_token_id(span.start_token, buffer);
+            buffer.push_whitespace();
+        }
+        match &statement.unit {
+            InstantiatedUnit::Component(name) | InstantiatedUnit::Configuration(name) => {
+                self.format_name(name.as_ref(), buffer);
             }
-            match &statement.unit {
-                InstantiatedUnit::Component(name) | InstantiatedUnit::Configuration(name) => {
-                    self.format_name(name.as_ref(), buffer);
-                }
-                InstantiatedUnit::Entity(name, architecture) => {
-                    self.format_name(name.as_ref(), buffer);
-                    if let Some(arch) = architecture {
-                        self.join_token_span(
-                            TokenSpan::new(arch.item.token - 1, arch.item.token + 1),
-                            buffer,
-                        )
-                    }
+            InstantiatedUnit::Entity(name, architecture) => {
+                self.format_name(name.as_ref(), buffer);
+                if let Some(arch) = architecture {
+                    self.join_token_span(
+                        TokenSpan::new(arch.item.token - 1, arch.item.token + 1),
+                        buffer,
+                    )
                 }
             }
-            if explicit_kind {
-                buffer.decrease_indent();
-            }
-            if let Some(generic_map) = &statement.generic_map {
-                indented!(buffer, {
-                    buffer.line_break();
-                    self.format_map_aspect(generic_map, buffer);
-                });
-            }
-            if let Some(port_map) = &statement.port_map {
-                indented!(buffer, {
-                    buffer.line_break();
-                    self.format_map_aspect(port_map, buffer);
-                });
-            }
-            self.format_token_id(span.end_token, buffer);
-        });
+        }
+        if let Some(generic_map) = &statement.generic_map {
+            indented!(buffer, {
+                buffer.line_break();
+                self.format_map_aspect(generic_map, buffer);
+            });
+        }
+        if let Some(port_map) = &statement.port_map {
+            indented!(buffer, {
+                buffer.line_break();
+                self.format_map_aspect(port_map, buffer);
+            });
+        }
+        self.format_token_id(span.end_token, buffer);
     }
 
     pub fn format_for_generate_statement(
@@ -549,20 +449,18 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        buffer.group(|buffer| {
-            // for
-            self.format_token_id(span.start_token, buffer);
-            buffer.push_whitespace();
-            // index
-            self.format_ident(&statement.index_name, buffer);
-            buffer.push_whitespace();
-            // in
-            self.format_token_id(statement.index_name.tree.token + 1, buffer);
-            buffer.push_whitespace();
-            self.format_discrete_range(&statement.discrete_range, buffer);
-            buffer.soft_line();
-            self.format_token_id(statement.generate_token, buffer);
-        });
+        // for
+        self.format_token_id(span.start_token, buffer);
+        buffer.push_whitespace();
+        // index
+        self.format_ident(&statement.index_name, buffer);
+        buffer.push_whitespace();
+        // in
+        self.format_token_id(statement.index_name.tree.token + 1, buffer);
+        buffer.push_whitespace();
+        self.format_discrete_range(&statement.discrete_range, buffer);
+        buffer.push_whitespace();
+        self.format_token_id(statement.generate_token, buffer);
         self.format_generate_body(&statement.body, buffer);
         buffer.line_break();
         self.format_token_span(
@@ -580,25 +478,23 @@ impl VHDLFormatter<'_> {
     ) {
         for cond in &statement.conds.conditionals {
             let condition = &cond.condition;
-            buffer.group(|buffer| {
-                if let Some(label) = &cond.item.alternative_label {
-                    // if | elsif
-                    self.format_token_id(label.tree.token - 1, buffer);
-                    buffer.push_whitespace();
-                    // label
-                    self.format_token_id(label.tree.token, buffer);
-                    // :
-                    self.format_token_id(label.tree.token + 1, buffer);
-                    buffer.push_whitespace();
-                } else {
-                    self.format_token_id(condition.span.start_token - 1, buffer);
-                    buffer.push_whitespace();
-                }
-                self.format_expression(condition.as_ref(), buffer);
-                buffer.soft_line();
-                // generate
-                self.format_token_id(condition.span.end_token + 1, buffer);
-            });
+            if let Some(label) = &cond.item.alternative_label {
+                // if | elsif
+                self.format_token_id(label.tree.token - 1, buffer);
+                buffer.push_whitespace();
+                // label
+                self.format_token_id(label.tree.token, buffer);
+                // :
+                self.format_token_id(label.tree.token + 1, buffer);
+                buffer.push_whitespace();
+            } else {
+                self.format_token_id(condition.span.start_token - 1, buffer);
+                buffer.push_whitespace();
+            }
+            self.format_expression(condition.as_ref(), buffer);
+            buffer.push_whitespace();
+            // generate
+            self.format_token_id(condition.span.end_token + 1, buffer);
             self.format_generate_body(&cond.item, buffer);
             buffer.line_break();
         }
@@ -646,37 +542,44 @@ impl VHDLFormatter<'_> {
         span: TokenSpan,
         buffer: &mut Buffer,
     ) {
-        buffer.group(|buffer| {
-            // case
-            self.format_token_id(span.start_token, buffer);
-            buffer.push_whitespace();
-            self.format_expression(statement.sels.expression.as_ref(), buffer);
-            buffer.soft_line();
-            // generate
-            self.format_token_id(statement.sels.expression.span.end_token + 1, buffer);
-        });
+        // case
+        self.format_token_id(span.start_token, buffer);
+        buffer.push_whitespace();
+        self.format_expression(statement.sels.expression.as_ref(), buffer);
+        buffer.push_whitespace();
+        // generate
+        self.format_token_id(statement.sels.expression.span.end_token + 1, buffer);
         indented!(buffer, {
             for alternative in &statement.sels.alternatives {
                 buffer.line_break();
-                if let (Some(first), Some(last)) =
-                    (alternative.choices.first(), alternative.choices.last())
-                {
-                    if let Some(label) = &alternative.item.alternative_label {
-                        // when
-                        self.format_token_id(label.tree.token - 1, buffer);
+                for (i, choice) in alternative.choices.iter().enumerate() {
+                    if i == 0 {
+                        if let Some(label) = &alternative.item.alternative_label {
+                            // when
+                            self.format_token_id(label.tree.token - 1, buffer);
+                            buffer.push_whitespace();
+                            // <ident>
+                            self.format_token_id(label.tree.token, buffer);
+                            // :
+                            self.format_token_id(label.tree.token + 1, buffer);
+                        } else {
+                            // when
+                            self.format_token_id(choice.span.start_token - 1, buffer);
+                        }
                         buffer.push_whitespace();
-                        // <ident>
-                        self.format_token_id(label.tree.token, buffer);
-                        // :
-                        self.format_token_id(label.tree.token + 1, buffer);
-                    } else {
-                        // when
-                        self.format_token_id(first.span.start_token - 1, buffer);
                     }
-                    buffer.push_whitespace();
-                    self.format_choices(&alternative.choices, buffer);
-                    buffer.push_whitespace();
-                    self.format_token_id(last.span.end_token + 1, buffer);
+                    self.format_choice(choice, buffer);
+                    if i < alternative.choices.len() - 1 {
+                        buffer.push_whitespace();
+                        // |
+                        self.format_token_id(choice.span.end_token + 1, buffer);
+                        buffer.push_whitespace();
+                    }
+                    if i == alternative.choices.len() - 1 {
+                        buffer.push_whitespace();
+                        // =>
+                        self.format_token_id(choice.span.end_token + 1, buffer);
+                    }
                 }
                 self.format_generate_body(&alternative.item, buffer);
             }
@@ -772,10 +675,18 @@ end block;",
         check_statement(
             "\
 name: block is
-    generic (gen: integer := 1);
-    generic map (gen => 1);
-    port (prt: integer := 1);
-    port map (prt => 2);
+    generic (
+        gen: integer := 1
+    );
+    generic map (
+        gen => 1
+    );
+    port (
+        prt: integer := 1
+    );
+    port map (
+        prt => 2
+    );
 begin
 end block;",
         );
@@ -827,7 +738,7 @@ end process;",
         check_statement("assert false;");
         check_statement("assert cond = true;");
         check_statement("postponed assert cond = true;");
-        check_statement("assert false\n    report \"message\"\n    severity error;");
+        check_statement("assert false report \"message\" severity error;");
     }
 
     #[test]
@@ -850,18 +761,26 @@ end process;",
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map (const => 1);",
+    generic map (
+        const => 1
+    );",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    port map (clk => clk_foo);",
+    port map (
+        clk => clk_foo
+    );",
         );
         check_statement(
             "\
 inst: component lib.foo.bar
-    generic map (const => 1)
-    port map (clk => clk_foo);",
+    generic map (
+        const => 1
+    )
+    port map (
+        clk => clk_foo
+    );",
         );
     }
 

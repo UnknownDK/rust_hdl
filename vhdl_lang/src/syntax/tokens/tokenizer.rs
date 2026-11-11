@@ -762,9 +762,14 @@ impl Comment {
     pub(crate) fn is_start_of_ignored_region(&self) -> bool {
         self.value.trim() == "vhdl_ls off"
     }
+
+    pub(crate) fn is_end_of_ignored_region(&self) -> bool {
+        self.value.trim() == "vhdl_ls on"
+    }
 }
 
 use crate::standard::VHDLStandard;
+use itertools::Itertools;
 use std::convert::AsRef;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Sub};
@@ -894,6 +899,45 @@ impl Token {
     /// and all changes that only affect comments.
     pub fn equal_format(&self, other: &Token) -> bool {
         self.kind == other.kind && self.value == other.value
+    }
+
+    pub(crate) fn leading_is_start_of_ignored_region(&self) -> bool {
+        let Some(comments) = &self.comments else {
+            return false;
+        };
+        if let Some((index, _)) = comments
+            .leading
+            .iter()
+            .find_position(|comment| comment.is_start_of_ignored_region())
+        {
+            // This construct guards against the case where we have a `vhdl_ls on` in the same
+            // comment block after a a `vhdl_ls off`
+            !comments.leading[index..]
+                .iter()
+                .any(Comment::is_end_of_ignored_region)
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn leading_is_end_of_ignored_region(&self) -> bool {
+        let Some(comments) = &self.comments else {
+            return false;
+        };
+        comments
+            .leading
+            .iter()
+            .any(Comment::is_end_of_ignored_region)
+    }
+
+    pub(crate) fn trailing_is_end_of_ignored_region(&self) -> bool {
+        let Some(comments) = &self.comments else {
+            return false;
+        };
+        comments
+            .trailing
+            .as_ref()
+            .is_some_and(Comment::is_end_of_ignored_region)
     }
 }
 
@@ -1697,125 +1741,9 @@ fn get_leading_comments(reader: &mut ContentReader<'_>) -> Result<Vec<Comment>, 
                 break;
             }
         }
-        if comments
-            .last()
-            .is_some_and(Comment::is_start_of_ignored_region)
-        {
-            comments.pop();
-            skip_ignored_region(reader);
-        }
     }
 
     Ok(comments)
-}
-
-/// Disabled source is opaque, not a token stream. In particular, an invalid
-/// string must not consume the closing directive or produce lexer diagnostics.
-fn skip_ignored_region(reader: &mut ContentReader<'_>) {
-    let mut end = IgnoredRegionEnd::default();
-    while let Some(ch) = reader.pop_char() {
-        if end.push(ch) {
-            return;
-        }
-    }
-}
-
-/// Shared with the formatter's lossless source-region extraction. Only comment
-/// boundaries are scanned: malformed literals and non-Latin-1 text are opaque.
-/// The state is bounded even for arbitrarily long disabled comments.
-#[derive(Default)]
-pub(crate) struct IgnoredRegionEnd {
-    state: IgnoredCommentState,
-}
-
-enum IgnoredCommentState {
-    Search(char),
-    Line(ClosingDirective),
-    Block {
-        directive: ClosingDirective,
-        star: bool,
-    },
-}
-
-impl std::default::Default for IgnoredCommentState {
-    fn default() -> Self {
-        Self::Search('\0')
-    }
-}
-
-impl IgnoredRegionEnd {
-    /// Returns true just after a complete closing directive (including a line
-    /// comment's newline). An unterminated region naturally extends to EOF.
-    pub(crate) fn push(&mut self, ch: char) -> bool {
-        match &mut self.state {
-            IgnoredCommentState::Search(previous) => {
-                if *previous == '-' && ch == '-' {
-                    self.state = IgnoredCommentState::Line(ClosingDirective::default());
-                } else if *previous == '/' && ch == '*' {
-                    self.state = IgnoredCommentState::Block {
-                        directive: ClosingDirective::default(),
-                        star: false,
-                    };
-                } else {
-                    *previous = ch;
-                }
-            }
-            IgnoredCommentState::Line(directive) => {
-                if ch == '\n' {
-                    let matched = directive.matches();
-                    self.state = IgnoredCommentState::default();
-                    return matched;
-                }
-                directive.push(ch);
-            }
-            IgnoredCommentState::Block { directive, star } => {
-                if *star && ch == '/' {
-                    let matched = directive.matches();
-                    self.state = IgnoredCommentState::default();
-                    return matched;
-                }
-                if *star {
-                    directive.push('*');
-                }
-                *star = ch == '*';
-                if !*star {
-                    directive.push(ch);
-                }
-            }
-        }
-        false
-    }
-}
-
-/// Incrementally matches `comment.trim() == "vhdl_ls on"` without allocating.
-#[derive(Default)]
-struct ClosingDirective {
-    position: usize,
-    invalid: bool,
-}
-
-impl ClosingDirective {
-    const TEXT: &'static [u8] = b"vhdl_ls on";
-
-    fn push(&mut self, ch: char) {
-        if self.invalid
-            || (ch.is_whitespace() && (self.position == 0 || self.position == Self::TEXT.len()))
-        {
-            return;
-        }
-        if Self::TEXT
-            .get(self.position)
-            .is_some_and(|&byte| char::from(byte) == ch)
-        {
-            self.position += 1;
-        } else {
-            self.invalid = true;
-        }
-    }
-
-    fn matches(&self) -> bool {
-        !self.invalid && self.position == Self::TEXT.len()
-    }
 }
 
 /// Skip whitespace but not newline
@@ -2204,14 +2132,7 @@ impl<'a> Tokenizer<'a> {
                 // Parsed a token.
                 let pos_start = self.state.start.pos();
                 let pos_end = self.reader.pos();
-                let mut trailing_comment = get_trailing_comment(&mut self.reader)?;
-                if trailing_comment
-                    .as_ref()
-                    .is_some_and(Comment::is_start_of_ignored_region)
-                {
-                    skip_ignored_region(&mut self.reader);
-                    trailing_comment = None;
-                }
+                let trailing_comment = get_trailing_comment(&mut self.reader)?;
                 let token_comments = if (!leading_comments.is_empty()) | trailing_comment.is_some()
                 {
                     Some(Box::new(TokenComments {
@@ -2240,7 +2161,38 @@ impl<'a> Tokenizer<'a> {
 
     pub fn pop(&mut self) -> DiagnosticResult<Option<Token>> {
         match self.pop_raw() {
-            Ok(token) => Ok(token),
+            Ok(None) => Ok(None),
+            Ok(Some(token)) => {
+                if token.leading_is_start_of_ignored_region() {
+                    if !token.trailing_is_end_of_ignored_region() {
+                        loop {
+                            match self.pop_raw() {
+                                Ok(None) => {
+                                    // Note: we should probably emit an unterminated error here
+                                    // instead of silently failing.
+                                    return Ok(None);
+                                }
+                                Ok(Some(tok)) => {
+                                    if tok.trailing_is_end_of_ignored_region() {
+                                        break;
+                                    } else if tok.leading_is_end_of_ignored_region() {
+                                        // Note: to be pedantic, the 'vhdl_ls on' should be
+                                        // removed from the comments. However, because we have
+                                        // no public API and the comments don't really play
+                                        // a crucial role in the language server or binary,
+                                        // we just emit the token for simplicity.
+                                        return Ok(Some(tok));
+                                    }
+                                }
+                                Err(_) => {}
+                            }
+                        }
+                    }
+                    self.pop()
+                } else {
+                    Ok(Some(token))
+                }
+            }
             Err(err) => {
                 self.state.start = self.reader.state();
                 Err(Diagnostic::syntax_error(
@@ -3735,20 +3687,6 @@ End after
     }
 
     #[test]
-    fn ignored_text_is_not_lexed_and_supports_trailing_directives() {
-        for code in [
-            "entity e is\n--vhdl_ls off\n€ __bad_identifier \"\n--vhdl_ls on\nend;",
-            "entity e is --vhdl_ls off\n€ \"\n--vhdl_ls on\nend;",
-            "entity e is\n/* vhdl_ls off */\n€ \"\n/* vhdl_ls on */end;",
-        ] {
-            assert_eq!(
-                kinds_tokenize(code),
-                vec![Entity, Identifier, Is, End, SemiColon]
-            );
-        }
-    }
-
-    #[test]
     fn on_directly_after_off() {
         // This should potentially emit a warning, but for now we just silently
         // ignore that there should be a `vhdl_ls on` at some point.
@@ -3762,41 +3700,5 @@ End after
         ",
         );
         assert_eq!(&tokens, &[Identifier, Is, Identifier, End, After]);
-    }
-
-    #[test]
-    fn ignored_regions_recognize_complete_line_and_block_directives() {
-        for closing in [
-            "/*\nvhdl_ls on\n*/",
-            "/* ordinary */ /* vhdl_ls on */",
-            "/* ordinary\n-- vhdl_ls on\n*/ /* vhdl_ls on */",
-            "-- prose /* vhdl_ls on */\n/* vhdl_ls on */",
-            "/* vhdl_ls on extra */ /* vhdl_ls on */",
-            "/* VHDL_LS ON */\n-- vhdl_ls on",
-            "/* vhdl_ls on **/\n-- vhdl_ls on",
-            "/*\r\n\t vhdl_ls on \r\n*/",
-        ] {
-            let code = format!("entity e is\n/* vhdl_ls off */\n€ bad \"\n{closing}\nend;");
-            assert_eq!(
-                kinds_tokenize(&code),
-                vec![Entity, Identifier, Is, End, SemiColon],
-                "{closing}"
-            );
-        }
-        for not_a_directive in [
-            "-- prose /* vhdl_ls on */",
-            "/* ordinary\n-- vhdl_ls on\n*/",
-            "/* vhdl_ls on extra */",
-            "/* VHDL_LS ON */",
-            "/* vhdl_ls on **/",
-            "-- vhdl_ls on extra",
-        ] {
-            let code = format!("entity e is\n-- vhdl_ls off\n{not_a_directive}\nend;");
-            assert_eq!(
-                kinds_tokenize(&code),
-                vec![Entity, Identifier, Is],
-                "{not_a_directive}"
-            );
-        }
     }
 }

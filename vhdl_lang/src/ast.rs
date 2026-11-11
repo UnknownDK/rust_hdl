@@ -20,7 +20,6 @@ pub(crate) use self::util::*;
 use crate::ast::token_range::*;
 use crate::data::*;
 use crate::named_entity::{EntityId, Reference};
-use crate::syntax::Comment;
 use crate::syntax::{Token, TokenAccess, TokenId};
 use crate::TokenSpan;
 pub(crate) use any_design_unit::*;
@@ -1667,5 +1666,4 @@ impl AnyDesignUnit {
 #[derive(PartialEq, Debug, Clone, Default)]
 pub struct DesignFile {
     pub design_units: Vec<(Vec<Token>, AnyDesignUnit)>,
-    pub final_comments: Vec<Comment>,
 }
