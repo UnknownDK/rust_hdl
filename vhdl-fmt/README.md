@@ -108,6 +108,38 @@ Source between `-- fmt: off` and `-- fmt: on` is copied verbatim. `-- fmt: skip`
 on the line above a declaration or statement, or at the end of its last line,
 does the same for that one item.
 
+## Editor integration
+
+Any editor that can pipe a buffer through a command can use `vhdl-fmt`: pass
+`-` to read standard input and write standard output, and the file's path as
+`--stdin-filename` so that the nearest `vhdl_ls.toml` is found. If the buffer
+does not parse, the command fails and prints nothing to standard output.
+
+### Zed
+
+Install the VHDL extension, then add this to `settings.json`:
+
+```json
+"languages": {
+  "VHDL": {
+    "format_on_save": "on",
+    "formatter": {
+      "external": {
+        "command": "vhdl-fmt",
+        "arguments": ["-", "--stdin-filename", "{buffer_path}"]
+      }
+    }
+  }
+}
+```
+
+`command` must be on the `PATH` (`cargo install --path vhdl-fmt`) or an
+absolute path such as `/path/to/rust_hdl/target/release/vhdl-fmt`. Style
+options can be appended to `arguments`, but a `[format]` table in the project
+file is shared with the command line and continuous integration. When a file
+cannot be formatted, Zed leaves the buffer unchanged and writes the reason to
+its log (`zed: open log`).
+
 ## Safety
 
 The output is parsed again and must hold the same tokens, with the same
