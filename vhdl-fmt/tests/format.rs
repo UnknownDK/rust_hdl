@@ -30,7 +30,7 @@ fn spacing_inside_a_line_is_normalized() {
          signal s:integer range -1 to 2 :=-(3)+abs(-2); \
          type arr is array(natural range<>)of bit; end;\n",
         "package p is\n    alias x is y[integer, bit return boolean];\n    \
-         signal s: integer range -1 to 2 := -(3) + abs (-2);\n    \
+         signal s: integer range -1 to 2 := -(3) + abs(-2);\n    \
          type arr is array (natural range <>) of bit;\nend;\n",
     );
     check(
@@ -39,7 +39,7 @@ fn spacing_inside_a_line_is_normalized() {
          z<=a after 2 ns,b after 3 ns; assert(x)report\"a\"severity note; end;\n",
         "architecture a of e is\nbegin\n    x <= not (a) and (b);\n    \
          y <= t'(1, 2) & x'range(1) & f(1)(2).g;\n    \
-         z <= a after 2 ns, b after 3 ns;\n    assert (x)\n        report \"a\"\n        severity note;\nend;\n",
+         z <= a after 2 ns, b after 3 ns;\n    assert (x) report \"a\" severity note;\nend;\n",
     );
 }
 
@@ -196,10 +196,10 @@ begin
     x <= a when sel = \"00\"
         else b after 1 ns when c
         else d_long_name;
-    with sel select
-        y <= a when \"00\",
-            b when \"01\" | \"10\",
-            c_long when others;
+    with sel select y <=
+        a when \"00\",
+        b when \"01\" | \"10\",
+        c_long when others;
     a_rather_long_target_signal_name_here <=
         another_long_signal_name;
 
@@ -212,13 +212,11 @@ begin
         end if;
         y <= transport a_long_name after 1 ns,
             b_long_name after 2 ns;
-        wait
-            on first_signal, second_signal
+        wait on first_signal, second_signal
             until condition
             for 1 ns;
-        report
-            \"a message that is long\"
-                & integer'image(x)
+        report \"a message that is long\"
+            & integer'image(x)
             severity failure;
         return some_function_name(argument_one)
             + offset_value;
@@ -580,7 +578,7 @@ end;
 }
 
 #[test]
-fn rows_that_do_not_fit_on_a_line_are_not_aligned() {
+fn rows_that_do_not_fit_on_a_line_wrap_after_the_aligned_column() {
     let mut settings = Settings::default();
     settings.format.align_assignments = true;
     settings.format.max_width = 40;
@@ -596,9 +594,64 @@ architecture a of e is
 begin
     a           <= b;
     long_target <= c;
-    x <= a_very_long_expression_name
-        + another_long_name;
-    yy <= d;
+    x           <=
+        a_very_long_expression_name
+            + another_long_name;
+    yy          <= d;
+end;
+"
+    );
+}
+
+#[test]
+fn a_declaration_too_long_once_padded_stays_aligned_and_wraps() {
+    let mut settings = Settings::default();
+    settings.format.align_declarations = true;
+    settings.format.space_before_colon = true;
+    settings.format.max_width = 60;
+    let output = formatted_with(
+        b"package p is constant ID : bit_vector(15 downto 0) := x\"BADA\"; \
+          constant VERSION : bit_vector(7 downto 0) := x\"01\"; \
+          constant INFO : bit_vector(23 downto 0) := ID & VERSION & PADDING; end;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "\
+package p is
+    constant ID      : bit_vector(15 downto 0) := x\"BADA\";
+    constant VERSION : bit_vector(7 downto 0)  := x\"01\";
+    constant INFO    : bit_vector(23 downto 0) := ID
+        & VERSION
+        & PADDING;
+end;
+"
+    );
+}
+
+#[test]
+fn attribute_declarations_and_specifications_are_aligned() {
+    let mut settings = Settings::default();
+    settings.format.align_declarations = true;
+    settings.format.space_before_colon = true;
+    let output = formatted_with(
+        b"architecture a of e is attribute mark : string; \
+          attribute mark of clk : signal is \"clock\"; \
+          attribute mark of long_name : signal is \"data\"; \
+          attribute mark of u0 : label is \"unit\"; \
+          signal s : bit; begin end;\n",
+        &settings,
+    );
+    assert_eq!(
+        String::from_utf8(output).unwrap(),
+        "\
+architecture a of e is
+    attribute mark              : string;
+    attribute mark of clk       : signal is \"clock\";
+    attribute mark of long_name : signal is \"data\";
+    attribute mark of u0        : label  is \"unit\";
+    signal s : bit;
+begin
 end;
 "
     );
@@ -777,6 +830,147 @@ begin
     p: process
     begin -- deeper
         null; -- five
+    end process;
+end;
+"
+    );
+}
+
+fn aligned_settings(max_width: usize) -> Settings {
+    let mut settings = Settings::default();
+    settings.format.align_declarations = true;
+    settings.format.align_associations = true;
+    settings.format.align_assignments = true;
+    settings.format.align_comments = true;
+    settings.format.space_before_colon = true;
+    settings.format.max_width = max_width;
+    settings
+}
+
+fn formatted_text(input: &str, settings: &Settings) -> String {
+    String::from_utf8(formatted_with(input.as_bytes(), settings)).unwrap()
+}
+
+#[test]
+fn matching_case_and_select_keep_their_question_mark_attached() {
+    check(
+        "architecture a of e is begin process begin \
+         case? s is when others => null; end case?; \
+         with s select? x <= a when '1', b when others; end process; end;\n",
+        "architecture a of e is\nbegin\n    process\n    begin\n        \
+         case? s is\n            when others =>\n                null;\n        end case?;\n        \
+         with s select? x <= a when '1', b when others;\n    end process;\nend;\n",
+    );
+}
+
+#[test]
+fn a_condition_moves_below_its_value_before_it_is_broken() {
+    let mut settings = Settings::default();
+    settings.format.max_width = 50;
+    assert_eq!(
+        formatted_text(
+            "architecture a of e is begin \
+             y <= zero when rst = '1' else first_long_name and second_long_name when en = '1'; end;\n",
+            &settings
+        ),
+        "\
+architecture a of e is
+begin
+    y <= zero when rst = '1'
+        else first_long_name and second_long_name
+            when en = '1';
+end;
+"
+    );
+}
+
+#[test]
+fn selected_assignments_with_many_alternatives_get_a_line_each() {
+    assert_eq!(
+        formatted_text(
+            "architecture a of e is begin \
+             with sel select y <= data when \"00\", (others => '0') when \"01\" | \"10\", \
+             (others => '1') when others; \
+             with sel select z <= a when '0', b when others; end;\n",
+            &aligned_settings(100)
+        ),
+        "\
+architecture a of e is
+begin
+    with sel select y <=
+        data            when \"00\",
+        (others => '0') when \"01\" | \"10\",
+        (others => '1') when others;
+    with sel select z <= a when '0', b when others;
+end;
+"
+    );
+}
+
+#[test]
+fn a_cell_much_wider_than_its_column_ends_the_run() {
+    assert_eq!(
+        formatted_text(
+            "package p is signal a : bit; signal bb : bit; \
+             signal a_very_long_signal_name_number_one, a_very_long_signal_name_number_two : bit; \
+             signal c : bit; signal ddd : bit; end;\n",
+            &aligned_settings(100)
+        ),
+        "\
+package p is
+    signal a  : bit;
+    signal bb : bit;
+    signal a_very_long_signal_name_number_one, a_very_long_signal_name_number_two : bit;
+    signal c   : bit;
+    signal ddd : bit;
+end;
+"
+    );
+}
+
+#[test]
+fn a_comment_line_in_a_list_does_not_end_the_run() {
+    assert_eq!(
+        formatted_text(
+            "entity e is port (clk : in bit; -- clock\n-- data\ndata_in : in bit_vector(7 downto 0);\n\n\
+             q : out bit); -- done\nend;\n",
+            &aligned_settings(100)
+        ),
+        "\
+entity e is
+    port (
+        clk     : in bit; -- clock
+        -- data
+        data_in : in bit_vector(7 downto 0);
+
+        q : out bit
+    ); -- done
+end;
+"
+    );
+}
+
+#[test]
+fn named_arguments_spread_over_lines_are_aligned() {
+    assert_eq!(
+        formatted_text(
+            "architecture a of e is begin process begin \
+             write_register(address => base_address, value => x\"DEADBEEF\", ok => done); \
+             x <= (a => 1, bb => 2); long_name <= f(a => 1, bb => 2); end process; end;\n",
+            &aligned_settings(50)
+        ),
+        "\
+architecture a of e is
+begin
+    process
+    begin
+        write_register(
+            address => base_address,
+            value   => x\"DEADBEEF\",
+            ok      => done
+        );
+        x         <= (a => 1, bb => 2);
+        long_name <= f(a => 1, bb => 2);
     end process;
 end;
 "

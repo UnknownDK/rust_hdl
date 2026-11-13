@@ -28,11 +28,13 @@ kept.
 - Expressions break before their operators, and operators of one kind break
   together.
 - Assignments and initial values move to the next line after `<=` or `:=`.
-  Conditional and selected assignments break before each `else` or after each
-  `,`.
+  Conditional assignments break before each `else`, and before `when` rather
+  than inside a condition. A selected assignment with more than
+  `inline_argument_limit` alternatives gives each of them a line.
 - `if`, loop and generate headers break before `then`, `loop` or `generate`.
-  `wait` and `report` break before their clauses; an assertion always puts
-  `report` and `severity` on their own lines.
+  A `wait`, `report` or assertion that does not fit breaks before its clauses;
+  the first clause of a `wait` and the message of a `report` stay on the first
+  line.
 - Names declared together, function results, array element types, aliases,
   subtypes and attribute specifications have a break point as well.
 
@@ -47,16 +49,24 @@ follow `keyword_case`, and so do the names of predefined attributes such as
 with `space_before_colon`; the colon of a label never has a space before it.
 
 Columns can be aligned on request. Rows are aligned with their neighbours; a
-blank line, a comment line or a row that does not fit on one line ends the run.
+blank line ends the run, and so does a comment line between declarations or
+statements. A comment line inside a parenthesized list does not. A row that is
+too long for one line, also once it is padded, stays aligned and wraps after
+its last column. A row that has to break before that ends the run, as does a
+row whose cell is more than 40 characters wider than is usual in its column.
 
 - `align_declarations`: the types of object, record element and interface
   declarations, their `:=`, and the types after port modes. With
-  `space_before_colon` the colons are lined up as well.
-- `align_associations`: the arrows of generic and port maps and of expanded
-  named aggregates.
-- `align_assignments`: the operators of unlabeled assignments.
+  `space_before_colon` the colons are lined up as well. Attribute declarations
+  and specifications are aligned with each other, at the colon and at `is`.
+- `align_associations`: the arrows of generic and port maps, of calls with
+  named arguments that are spread over lines, and of expanded named
+  aggregates.
+- `align_assignments`: the operators of unlabeled assignments, and the `when`
+  of the alternatives of a selected assignment.
 - `align_comments`: the comments that end neighbouring lines of the same
-  indentation, unless that would push a line over the width.
+  indentation, unless that would push a line over the width. A line that
+  starts with `)` takes no part.
 
 With `align_declarations` or `align_associations` on, a blank line between the
 entries of the aligned list is kept and separates the runs.

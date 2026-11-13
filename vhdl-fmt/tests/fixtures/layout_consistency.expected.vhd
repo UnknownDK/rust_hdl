@@ -13,10 +13,10 @@ begin
         and FEATURE_B_ENABLED
         and FEATURE_C_ENABLED
     generate
-        with selection_value select
-            result <= first_value when first_choice,
-                second_value when second_choice,
-                default_value when others;
+        with selection_value select result <=
+            first_value when first_choice,
+            second_value when second_choice,
+            default_value when others;
     end generate;
 
     process

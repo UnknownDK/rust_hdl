@@ -128,10 +128,10 @@ fn expanded_generate_headers_keep_their_labels_and_boundaries() {
 }
 
 #[test]
-fn selected_assignments_put_the_target_below_the_selector() {
+fn selected_assignments_give_each_alternative_a_line() {
     let input = "entity e is end; architecture rtl of e is begin with selection_value select result <= first_value when first_choice, second_value when second_choice, default_value when others; end;";
     let output = checked(input, config(60));
-    assert!(output.contains("    with selection_value select\n        result <= first_value when first_choice,\n            second_value when second_choice,\n            default_value when others;"), "{output}");
+    assert!(output.contains("    with selection_value select result <=\n        first_value when first_choice,\n        second_value when second_choice,\n        default_value when others;"), "{output}");
     let compact = checked("entity e is end; architecture rtl of e is begin with s select x <= a when 0, b when others; end;", config(100));
     assert!(
         compact.contains("with s select x <= a when 0, b when others;"),

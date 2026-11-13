@@ -60,9 +60,9 @@ fn short_attributes_and_aliases_remain_inline() {
     let source = "package p is attribute flag: boolean; attribute flag of x: signal is true; attribute flag of all: signal is false; attribute flag of others: signal is true; alias word: bit_vector(0 to 7) is data; alias f is original[bit return bit]; end;";
     let output = checked(source, config(100));
     for statement in [
-        "attribute flag : boolean;",
-        "attribute flag of x : signal is true;",
-        "attribute flag of all : signal is false;",
+        "attribute flag           : boolean;",
+        "attribute flag of x      : signal is true;",
+        "attribute flag of all    : signal is false;",
         "attribute flag of others : signal is true;",
         "alias word : bit_vector(0 to 7) is data;",
         "alias f is original[bit return bit];",
@@ -243,7 +243,7 @@ fn comment_expansion_aligns_without_affecting_neighboring_inline_maps() {
 }
 
 #[test]
-fn wrapped_rows_do_not_widen_neighboring_maps() {
+fn wrapped_rows_stay_aligned_in_maps() {
     let source = architecture("u: entity work.child port map(a => x, bb => y, extremely_long_formal => calculate(first_input, second_input, third_input), c => z, dddd => w);");
     let output = checked(
         &source,
@@ -253,11 +253,11 @@ fn wrapped_rows_do_not_widen_neighboring_maps() {
         },
     );
     assert!(
-        output.contains("a  => x,\n            bb => y,"),
+        output.contains("a                     => x,\n            bb                    => y,\n            extremely_long_formal => calculate(\n"),
         "{output}"
     );
     assert!(
-        output.contains("c    => z,\n            dddd => w"),
+        output.contains("c                     => z,\n            dddd                  => w"),
         "{output}"
     );
     assert_width(&output, 50);

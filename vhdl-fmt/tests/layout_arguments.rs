@@ -79,7 +79,7 @@ fn grouped_parameters_count_each_name_without_rewriting_declarations() {
 }
 
 #[test]
-fn assertion_clauses_expand_independently_of_argument_settings() {
+fn assertion_clauses_expand_only_when_the_assertion_does_not_fit() {
     let input = "entity e is end; architecture rtl of e is begin check_it: postponed assert ok report \"why\" severity failure; assert ok severity warning; assert ok; process begin local_check: assert ok report \"why\"; end process; end;";
     for inline_argument_limit in [0, 2, 100] {
         let output = checked(
@@ -90,19 +90,28 @@ fn assertion_clauses_expand_independently_of_argument_settings() {
             },
         );
         assert!(
-            output.contains(
-                "check_it: postponed assert ok\n        report \"why\"\n        severity failure;"
-            ),
+            output.contains("check_it: postponed assert ok report \"why\" severity failure;"),
             "{output}"
         );
-        assert!(
-            output.contains("assert ok\n        severity warning;"),
-            "{output}"
-        );
+        assert!(output.contains("assert ok severity warning;"), "{output}");
         assert!(output.contains("assert ok;"));
         assert!(
-            output.contains("local_check: assert ok\n            report \"why\";"),
+            output.contains("local_check: assert ok report \"why\";"),
             "{output}"
+        );
+        let narrow = checked(
+            input,
+            FormatConfig {
+                inline_argument_limit,
+                max_width: 40,
+                ..FormatConfig::default()
+            },
+        );
+        assert!(
+            narrow.contains(
+                "check_it: postponed assert ok\n        report \"why\"\n        severity failure;"
+            ),
+            "{narrow}"
         );
     }
 }

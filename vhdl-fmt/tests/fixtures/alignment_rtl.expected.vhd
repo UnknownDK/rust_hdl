@@ -60,8 +60,8 @@ begin
             clk     => clk,
             reset_n => reset_n,
 
-            valid_in => payload_valid,
-            data_in  => payload,
+            valid_in  => payload_valid,
+            data_in   => payload,
             -- External outputs
             valid_out => valid_out,
             data_out  => data_out

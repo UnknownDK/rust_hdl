@@ -41,6 +41,9 @@ enum Kind {
     Space,
     /// Lazy inter-token padding, resolved while composing an alignment run.
     Align(usize),
+    /// Padding of a column whose run is complete. It no longer counts as a
+    /// column of an enclosing row.
+    Padding(usize),
     /// Select a row's padding using the enclosing delimiter group's mode.
     IfBreak {
         flat: Box<Doc>,
@@ -131,6 +134,49 @@ impl Doc {
         self.flat.width()
     }
 
+    /// The width of the row's first line if it wraps after its last alignment
+    /// marker: everything up to the first optional break that follows the
+    /// marker. `None` if there is no such break, or if a group that breaks
+    /// all at once holds both a marker and a break, since wrapping would then
+    /// move a column off the first line.
+    pub(crate) fn aligned_head_width(&self) -> Option<usize> {
+        let mut head = Head::default();
+        self.measure_head(&mut head);
+        head.end.filter(|_| !head.blocked)
+    }
+
+    fn measure_head(&self, head: &mut Head) {
+        match &self.kind {
+            Kind::Align(_) => {
+                head.markers += 1;
+                head.end = None;
+                head.width += self.flat.width();
+            }
+            Kind::SoftLine(_) | Kind::PreferredLine => {
+                head.end.get_or_insert(head.width);
+                head.width += self.flat.width();
+            }
+            Kind::Indent(_, child) => child.measure_head(head),
+            Kind::IfBreak { flat, .. } => flat.measure_head(head),
+            Kind::Group { children, fill, .. } => {
+                let markers = head.markers;
+                for child in children {
+                    child.measure_head(head);
+                }
+                let direct_break = children
+                    .iter()
+                    .any(|child| matches!(child.kind, Kind::SoftLine(_) | Kind::PreferredLine));
+                head.blocked |= !fill && direct_break && head.markers > markers;
+            }
+            Kind::Concat(children) => {
+                for child in children {
+                    child.measure_head(head);
+                }
+            }
+            _ => head.width += self.flat.width(),
+        }
+    }
+
     pub(crate) fn pad_alignments(&mut self, extras: &[usize]) -> bool {
         let mut marker = 0;
         self.pad_alignments_inner(extras, &mut marker)
@@ -172,6 +218,25 @@ impl Doc {
             }
         }
         changed
+    }
+
+    /// Settle the columns of a row whose run is complete, so that a row
+    /// around it does not take them for its own.
+    pub(crate) fn settle_alignments(&mut self) {
+        match &mut self.kind {
+            Kind::Align(width) => self.kind = Kind::Padding(*width),
+            Kind::Indent(_, child) => child.settle_alignments(),
+            Kind::IfBreak { flat, broken } => {
+                flat.settle_alignments();
+                broken.settle_alignments();
+            }
+            Kind::Group { children, .. } | Kind::Concat(children) => {
+                for child in children {
+                    child.settle_alignments();
+                }
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn pad_alignments_when_broken(&mut self, extras: &[usize]) {
@@ -291,6 +356,15 @@ impl Doc {
     }
 }
 
+/// State of [`Doc::aligned_head_width`].
+#[derive(Default)]
+struct Head {
+    width: usize,
+    end: Option<usize>,
+    markers: usize,
+    blocked: bool,
+}
+
 #[derive(Clone, Copy)]
 enum Mode {
     Flat,
@@ -338,7 +412,7 @@ pub(crate) fn render_docs(docs: &[Doc], indent_width: usize, max_width: usize) -
                 };
             }
             Kind::Space => space = space.max(usize::from(column != 0)),
-            Kind::Align(width) => {
+            Kind::Align(width) | Kind::Padding(width) => {
                 if column != 0 {
                     space = space.saturating_add(*width);
                 }

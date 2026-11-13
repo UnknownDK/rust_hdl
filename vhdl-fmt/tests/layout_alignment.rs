@@ -122,7 +122,7 @@ fn map_and_interface_blank_lines_are_preserved_with_alignment() {
 }
 
 #[test]
-fn width_limits_win_and_wrapped_rows_do_not_widen_neighbors() {
+fn width_limits_win_and_wrapped_rows_stay_aligned() {
     let input = "package p is\nsignal a: bit;\nsignal longer: bit;\nsignal extremely_long_name: integer := calculate(first_operand, second_operand);\nsignal b: bit;\nsignal cc: bit;\nend;";
     for max_width in 35..=110 {
         for indent_width in [0, 2, 4] {
@@ -150,12 +150,22 @@ fn width_limits_win_and_wrapped_rows_do_not_widen_neighbors() {
             ..aligned()
         },
     );
-    assert!(output.contains("signal a      : bit;"), "{output}");
-    assert!(output.contains("signal b  : bit;"), "{output}");
+    assert!(
+        output.contains("signal a                   : bit;"),
+        "{output}"
+    );
+    assert!(
+        output.contains("signal extremely_long_name : integer :=\n"),
+        "{output}"
+    );
+    assert!(
+        output.contains("signal cc                  : bit;"),
+        "{output}"
+    );
 }
 
 #[test]
-fn padding_falls_back_when_individually_short_rows_cannot_align() {
+fn a_short_row_wraps_when_padding_makes_it_too_long() {
     let input = "package p is\nsignal a: integer := 123456789;\nsignal lengthy_name: bit;\nend;";
     let output = checked(
         input,
@@ -165,7 +175,7 @@ fn padding_falls_back_when_individually_short_rows_cannot_align() {
         },
     );
     assert!(
-        output.contains("signal a : integer := 123456789;"),
+        output.contains("signal a            : integer :=\n        123456789;"),
         "{output}"
     );
     assert!(output.lines().all(|line| line.len() <= 38));

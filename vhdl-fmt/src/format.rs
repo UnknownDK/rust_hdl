@@ -120,6 +120,8 @@ fn space_between(
         || previous == Tick
         || next == Tick
         || previous_is_sign
+        // The matching forms `case?` and `select?`.
+        || (next == Que && matches!(previous, Keyword(self::Keyword::Case | self::Keyword::Select)))
     {
         return false;
     }
@@ -129,7 +131,7 @@ fn space_between(
             let attribute = matches!(previous, Keyword(_)) && before_previous == Some(Tick);
             let header = matches!(
                 previous,
-                Keyword(self::Keyword::Process | self::Keyword::Block)
+                Keyword(self::Keyword::Process | self::Keyword::Block | self::Keyword::Abs)
             );
             !(ends_operand(previous) || header || attribute)
         }
@@ -310,6 +312,29 @@ fn is_declaration_colon(parent: NodeKind) -> bool {
             | AttributeDeclaration
             | EntitySpecification
     )
+}
+
+/// A cell that is this much wider than the median of its column is not
+/// aligned with: the padding of the other rows would exceed it.
+const MAX_ALIGNMENT_GAP: usize = 40;
+
+/// A row of an aligned run: where its document is and how wide its cells are.
+struct AlignedRow {
+    index: usize,
+    widths: Vec<usize>,
+    /// Width of the row on one line.
+    flat: usize,
+    /// Width of the first line if the row wraps after its last column.
+    head: Option<usize>,
+}
+
+impl AlignedRow {
+    /// With `padding` added, the row fits on one line, or can wrap without
+    /// moving a column off its first line.
+    fn fits(&self, padding: usize, available: usize) -> bool {
+        self.flat + padding <= available
+            || self.head.is_some_and(|head| head + padding <= available)
+    }
 }
 
 /// A line break requested by a rule before the next token.
@@ -529,10 +554,20 @@ impl<'a> Emitter<'a> {
                 self.inner(node);
                 self.level -= 1;
             }
-            // In an assertion the report and severity each get a line.
-            ReportClause | SeverityClause if parent == Some(Assertion) => {
+            // The first clause of a wait statement stays next to `wait`.
+            SensitivityClause | ConditionClause | TimeoutClause
+                if node.prev_sibling_or_token().is_some_and(|previous| {
+                    matches!(previous, SyntaxElement::Token(token)
+                            if token.kind() == TokenKind::Keyword(Keyword::Wait))
+                }) =>
+            {
+                self.inner(node)
+            }
+            // An assertion that does not fit on one line gives the report
+            // and the severity a line each.
+            ReportClause if parent == Some(Assertion) => {
                 self.level += 1;
-                self.break_line(1);
+                self.soft_break(true);
                 self.inner(node);
                 self.level -= 1;
             }
@@ -584,15 +619,13 @@ impl<'a> Emitter<'a> {
             ReturnStatement => {
                 self.after_token(node, |kind| kind == TokenKind::Keyword(Keyword::Return))
             }
-            ReportClause => {
-                self.after_token(node, |kind| kind == TokenKind::Keyword(Keyword::Report))
+            // The message stays next to `report`. If the statement does not
+            // fit on one line, the severity gets a line of its own.
+            ReportStatement | Assertion => {
+                self.grouped(Shape::Together, |emitter| emitter.children(node));
             }
-            // A report that does not fit on one line gives the message and
-            // the severity a line each.
-            ReportStatement => {
-                self.grouped(Shape::Together, |emitter| {
-                    emitter.after_token(node, |kind| kind == TokenKind::Keyword(Keyword::Report))
-                });
+            WhenWaveform | ElseWhenWaveform | WhenExpression | ElseWhenExpression => {
+                self.conditional_item(node)
             }
             SubtypeDeclaration => {
                 self.after_token(node, |kind| kind == TokenKind::Keyword(Keyword::Is))
@@ -661,7 +694,18 @@ impl<'a> Emitter<'a> {
                 }
                 SyntaxElement::Node(child) => {
                     let targets = self.block_row_targets(&child);
-                    if targets.is_empty() || Self::starts_new_run(&child) {
+                    // Attributes are aligned with each other, not with the
+                    // object declarations next to them.
+                    let is_attribute = |kind| {
+                        matches!(
+                            kind,
+                            NodeKind::AttributeDeclaration | NodeKind::AttributeSpecification
+                        )
+                    };
+                    let other_family = previous.is_some_and(|previous| {
+                        is_attribute(previous) != is_attribute(child.kind())
+                    });
+                    if targets.is_empty() || other_family || Self::starts_new_run(&child) {
                         self.align_rows(&mut run, level, false);
                     }
                     let is_row = !targets.is_empty();
@@ -721,6 +765,25 @@ impl<'a> Emitter<'a> {
             }
         }
         newlines >= 2
+    }
+
+    /// A blank line separates the item from the one before it, possibly with
+    /// comments in between.
+    fn has_blank_line_before(item: &SyntaxNode) -> bool {
+        let mut newlines = 0;
+        for piece in item.first_token().leading_trivia().iter() {
+            match piece {
+                TriviaPiece::LineComment(_) | TriviaPiece::BlockComment(_) => newlines = 0,
+                TriviaPiece::CarriageReturnLineFeeds(count) => newlines += count,
+                _ if piece.is_newline() => newlines += piece.byte_len(),
+                _ => {}
+            }
+            // The first newline ends the line of the previous item.
+            if newlines >= 2 {
+                return true;
+            }
+        }
+        false
     }
 
     fn has_blank_line_above(item: &SyntaxNode) -> bool {
@@ -786,6 +849,22 @@ impl<'a> Emitter<'a> {
             {
                 self.declaration_targets(item)
             }
+            AttributeDeclaration if self.config.align_declarations => {
+                self.declaration_targets(item)
+            }
+            // The colon is the entity specification's; `is` is a second column.
+            AttributeSpecification if self.config.align_declarations => {
+                let mut targets = item
+                    .children()
+                    .find(|child| child.kind() == EntitySpecification)
+                    .map(|entity| self.declaration_targets(&entity))
+                    .unwrap_or_default();
+                targets.extend(
+                    Self::direct_token(item, |kind| kind == TokenKind::Keyword(Keyword::Is))
+                        .map(|is| (is, 1)),
+                );
+                targets
+            }
             SimpleVariableAssignment
             | ConditionalVariableAssignment
             | SimpleWaveformAssignment
@@ -817,7 +896,6 @@ impl<'a> Emitter<'a> {
     /// for them. `expanded` lists always have one entry per line.
     fn list_row_targets(
         &self,
-        parent: NodeKind,
         list: &SyntaxNode,
         item: &SyntaxNode,
         expanded: bool,
@@ -856,19 +934,15 @@ impl<'a> Emitter<'a> {
             InterfaceFileDeclaration if self.config.align_declarations => {
                 self.declaration_targets(item).into_iter().take(1).collect()
             }
-            AssociationElement
-                if self.config.align_associations
-                    && matches!(parent, GenericMapAspect | PortMapAspect) =>
-            {
-                item.children()
-                    .find(|child| child.kind() == Formal)
-                    .and_then(|formal| {
-                        Self::direct_token(&formal, |kind| kind == TokenKind::RightArrow)
-                    })
-                    .map(|arrow| (arrow, 1))
-                    .into_iter()
-                    .collect()
-            }
+            AssociationElement if self.config.align_associations => item
+                .children()
+                .find(|child| child.kind() == Formal)
+                .and_then(|formal| {
+                    Self::direct_token(&formal, |kind| kind == TokenKind::RightArrow)
+                })
+                .map(|arrow| (arrow, 1))
+                .into_iter()
+                .collect(),
             ElementAssociation if self.config.align_associations && expanded => item
                 .children()
                 .find(|child| child.kind() == ElementChoices)
@@ -883,7 +957,8 @@ impl<'a> Emitter<'a> {
     }
 
     /// Pad the rows of a run so that their columns line up, then start a new
-    /// run. Rows that do not fit on one line, also once padded, take no part.
+    /// run. A row that is too long for one line still takes part if it can
+    /// wrap after its last column; other rows that do not fit end the run.
     /// With `when_broken`, the padding only applies if the enclosing list is
     /// not on one line.
     fn align_rows(&mut self, run: &mut Vec<usize>, level: usize, when_broken: bool) {
@@ -891,12 +966,18 @@ impl<'a> Emitter<'a> {
             .config
             .max_width
             .saturating_sub(level * self.config.indent_width);
-        let mut rows: Vec<(usize, Vec<usize>)> = Vec::new();
-        for index in std::mem::take(run) {
-            match self.docs[index].alignment_widths() {
-                Some(widths) if self.docs[index].flat_width() <= available => {
-                    rows.push((index, widths))
-                }
+        let mut rows: Vec<AlignedRow> = Vec::new();
+        let run = std::mem::take(run);
+        for &index in &run {
+            let doc = &self.docs[index];
+            let row = doc.alignment_widths().map(|widths| AlignedRow {
+                index,
+                widths,
+                flat: doc.flat_width(),
+                head: doc.aligned_head_width(),
+            });
+            match row {
+                Some(row) if row.fits(0, available) => rows.push(row),
                 _ => {
                     self.align_run(&rows, available, when_broken);
                     rows.clear();
@@ -904,23 +985,26 @@ impl<'a> Emitter<'a> {
             }
         }
         self.align_run(&rows, available, when_broken);
+        for index in run {
+            self.docs[index].settle_alignments();
+        }
     }
 
-    fn align_run(&mut self, rows: &[(usize, Vec<usize>)], available: usize, when_broken: bool) {
+    fn align_run(&mut self, rows: &[AlignedRow], available: usize, when_broken: bool) {
         if rows.len() < 2 {
             return;
         }
         // The last cell of a row is not followed by a column.
         let columns = rows
             .iter()
-            .map(|(_, widths)| widths.len() - 1)
+            .map(|row| row.widths.len() - 1)
             .max()
             .unwrap_or(0);
         let widest: Vec<usize> = (0..columns)
             .map(|column| {
                 rows.iter()
-                    .filter(|(_, widths)| widths.len() > column + 1)
-                    .map(|(_, widths)| widths[column])
+                    .filter(|row| row.widths.len() > column + 1)
+                    .map(|row| row.widths[column])
                     .max()
                     .unwrap_or(0)
             })
@@ -932,20 +1016,32 @@ impl<'a> Emitter<'a> {
                 .map(|(widest, width)| widest - width)
                 .collect()
         };
-        let too_wide = rows.iter().position(|(index, widths)| {
-            self.docs[*index].flat_width() + padding(widths).iter().sum::<usize>() > available
+        // A cell much wider than the others of its column would push them
+        // all far to the right. Its row ends the run instead.
+        let outlier = (0..columns).find_map(|column| {
+            let cells =
+                |row: &AlignedRow| (row.widths.len() > column + 1).then(|| row.widths[column]);
+            let mut sorted: Vec<usize> = rows.iter().filter_map(cells).collect();
+            sorted.sort_unstable();
+            let median = sorted[(sorted.len() - 1) / 2];
+            rows.iter()
+                .position(|row| cells(row).is_some_and(|width| width > median + MAX_ALIGNMENT_GAP))
+        });
+        let too_wide = outlier.or_else(|| {
+            rows.iter()
+                .position(|row| !row.fits(padding(&row.widths).iter().sum(), available))
         });
         if let Some(too_wide) = too_wide {
             self.align_run(&rows[..too_wide], available, when_broken);
             self.align_run(&rows[too_wide + 1..], available, when_broken);
             return;
         }
-        for (index, widths) in rows {
-            let padding = padding(widths);
+        for row in rows {
+            let padding = padding(&row.widths);
             if when_broken {
-                self.docs[*index].pad_alignments_when_broken(&padding);
+                self.docs[row.index].pad_alignments_when_broken(&padding);
             } else {
-                self.docs[*index].pad_alignments(&padding);
+                self.docs[row.index].pad_alignments(&padding);
             }
         }
     }
@@ -1079,7 +1175,6 @@ impl<'a> Emitter<'a> {
                     if expanded {
                         self.pending = Some(Break::Hard(1, Edge::Inside));
                     }
-                    let parent = node.kind();
                     let mut run = Vec::new();
                     // Short positional values are packed onto as few lines
                     // as the width allows, not spread one per line.
@@ -1091,10 +1186,11 @@ impl<'a> Emitter<'a> {
                             match item {
                                 SyntaxElement::Node(item) if packed => emitter.node(&item),
                                 SyntaxElement::Node(item) => {
-                                    let targets =
-                                        emitter.list_row_targets(parent, &list, &item, expanded);
+                                    let targets = emitter.list_row_targets(&list, &item, expanded);
                                     let is_row = !targets.is_empty();
-                                    if !is_row || Self::starts_new_run(&item) {
+                                    // Unlike in a block, a comment between
+                                    // the entries does not end the run.
+                                    if !is_row || Self::has_blank_line_before(&item) {
                                         emitter.align_rows(&mut run, base + 1, !expanded);
                                     }
                                     // Where columns are aligned, a blank line
@@ -1359,6 +1455,90 @@ impl<'a> Emitter<'a> {
         self.level = outer;
     }
 
+    /// `value when condition` of a conditional assignment. The condition moves
+    /// to a new line, one level deeper, before it is broken itself.
+    fn conditional_item(&mut self, node: &SyntaxNode) {
+        let outer = self.level;
+        let mut condition = None;
+        for child in node.children_with_tokens() {
+            match child {
+                SyntaxElement::Node(child) => self.node(&child),
+                SyntaxElement::Token(token) => {
+                    if token.kind() == TokenKind::Keyword(Keyword::When) && condition.is_none() {
+                        self.level = outer + 1;
+                        self.break_inside_group = 0;
+                        self.pending = Some(Break::Preferred);
+                        condition = Some(self.open_group());
+                    }
+                    self.token(&token);
+                }
+            }
+        }
+        if let Some(opened) = condition {
+            self.close_group(opened, outer + 1, Shape::Together);
+        }
+        self.level = outer;
+    }
+
+    /// A selected assignment with more alternatives than fit a line by
+    /// `inline_argument_limit`: every alternative gets a line, one level
+    /// below the statement, and `align_assignments` lines up their `when`.
+    fn expanded_selection(&mut self, children: &[SyntaxElement]) {
+        let outer = self.level;
+        self.grouped(Shape::Fill, |emitter| {
+            for child in children {
+                match child {
+                    SyntaxElement::Node(list)
+                        if matches!(
+                            list.kind(),
+                            NodeKind::SelectedWaveforms | NodeKind::SelectedExpressions
+                        ) =>
+                    {
+                        emitter.level = outer + 1;
+                        emitter.pending = Some(Break::Hard(1, Edge::First));
+                        let mut run = Vec::new();
+                        for item in list.children_with_tokens() {
+                            match item {
+                                SyntaxElement::Node(item) => {
+                                    let targets = Self::direct_token(&item, |kind| {
+                                        kind == TokenKind::Keyword(Keyword::When)
+                                    })
+                                    .filter(|_| emitter.config.align_assignments)
+                                    .map(|when| (when, 1))
+                                    .into_iter()
+                                    .collect();
+                                    let row = emitter.with_targets(targets, |emitter| {
+                                        emitter.grouped(Shape::Fill, |emitter| emitter.node(&item))
+                                    });
+                                    run.extend(row);
+                                }
+                                SyntaxElement::Token(token) => {
+                                    emitter.token(&token);
+                                    emitter.pending = Some(Break::Hard(1, Edge::Inside));
+                                }
+                            }
+                        }
+                        emitter.align_rows(&mut run, outer + 1, false);
+                        emitter.level = outer;
+                    }
+                    SyntaxElement::Node(child) => {
+                        let is_preamble = child.kind() == NodeKind::SelectedAssignmentPreamble;
+                        emitter.node(child);
+                        if is_preamble {
+                            emitter.level = outer + 1;
+                            emitter.soft_break(true);
+                        }
+                    }
+                    SyntaxElement::Token(token) => {
+                        emitter.token(token);
+                        emitter.level = outer;
+                    }
+                }
+            }
+        });
+        self.level = outer;
+    }
+
     /// `with ... select` stays on the first line. If the statement does not
     /// fit, the assignment moves to the next line, one level deeper.
     fn selected_assignment(&mut self, node: &SyntaxNode) {
@@ -1370,6 +1550,24 @@ impl<'a> Emitter<'a> {
                     if child.kind() == NodeKind::SelectedAssignmentPreamble)
             })
             .map_or(0, |index| index + 1);
+        let alternatives = children
+            .iter()
+            .filter_map(|child| match child {
+                SyntaxElement::Node(child)
+                    if matches!(
+                        child.kind(),
+                        NodeKind::SelectedWaveforms | NodeKind::SelectedExpressions
+                    ) =>
+                {
+                    Some(child.children().count())
+                }
+                _ => None,
+            })
+            .next()
+            .unwrap_or(0);
+        if alternatives > self.config.inline_argument_limit {
+            return self.expanded_selection(&children);
+        }
         self.grouped(Shape::Together, |emitter| {
             for child in &children[..preamble] {
                 match child {
@@ -1835,8 +2033,12 @@ impl<'a> Emitter<'a> {
                 continue;
             };
             let mut run = vec![first];
+            // A line that closes a list is not a row of the lines around it.
+            let closes = |line: &str| line.trim_start().starts_with(')');
             while self.config.align_comments
+                && !closes(lines[index])
                 && index + run.len() < lines.len()
+                && !closes(lines[index + run.len()])
                 && indent(lines[index + run.len()]) == indent(lines[index])
             {
                 match split(lines[index + run.len()]) {
